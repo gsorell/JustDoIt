@@ -1,0 +1,281 @@
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import { AppState, AppStateStatus } from 'react-native';
+import {
+  AppSettings,
+  CheckIn,
+  CheckInResponse,
+  Directive,
+  DirectiveType,
+} from '../types';
+import {
+  addCheckIn,
+  addDirective as storageAddDirective,
+  deleteDirective as storageDeleteDirective,
+  computeStreak,
+  generateId,
+  getAppSettings,
+  getCheckIns,
+  getDirectives,
+  pendingCheckInForDirective,
+  saveAppSettings,
+  updateCheckIn,
+  updateDirective,
+} from '../services/storage';
+import {
+  cancelDirectiveNotifications,
+  requestNotificationPermissions,
+  scheduleNextCheckIn,
+} from '../services/notifications';
+
+interface NewDirectivePayload {
+  type: DirectiveType;
+  action: string;
+  durationDays: number | null;
+  checkInIntervalMinutes: number;
+  carryForward: boolean;
+}
+
+interface AppContextType {
+  directives: Directive[];
+  checkIns: CheckIn[];
+  settings: AppSettings | null;
+  isLoading: boolean;
+  addDirective: (payload: NewDirectivePayload) => Promise<void>;
+  respondToCheckIn: (checkInId: string, response: 'success' | 'failure') => Promise<void>;
+  pauseDirective: (id: string) => Promise<void>;
+  resumeDirective: (id: string) => Promise<void>;
+  deleteDirective: (id: string) => Promise<void>;
+  getStreak: (directiveId: string) => number;
+  getDueCheckIn: (directiveId: string) => CheckIn | undefined;
+  getPendingCheckIn: (directiveId: string) => CheckIn | undefined;
+  refresh: () => Promise<void>;
+}
+
+const AppContext = createContext<AppContextType | null>(null);
+
+export function AppProvider({ children }: { children: React.ReactNode }) {
+  const [directives, setDirectives] = useState<Directive[]>([]);
+  const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Map of directiveId -> notification identifier
+  const notifIds = useRef<Record<string, string>>({});
+
+  const load = useCallback(async () => {
+    const [dirs, cis, setts] = await Promise.all([
+      getDirectives(),
+      getCheckIns(),
+      getAppSettings(),
+    ]);
+    setDirectives(dirs);
+    setCheckIns(cis);
+    setSettings(setts);
+  }, []);
+
+  useEffect(() => {
+    load().finally(() => setIsLoading(false));
+  }, [load]);
+
+  // Refresh on foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener(
+      'change',
+      (state: AppStateStatus) => {
+        if (state === 'active') load();
+      }
+    );
+    return () => sub.remove();
+  }, [load]);
+
+  const refresh = useCallback(async () => {
+    await load();
+  }, [load]);
+
+  const addDirective = useCallback(
+    async (payload: NewDirectivePayload) => {
+      const now = new Date().toISOString();
+      const directive: Directive = {
+        id: generateId(),
+        ...payload,
+        createdAt: now,
+        active: true,
+      };
+      await storageAddDirective(directive);
+
+      // Schedule first check-in
+      const checkIn: CheckIn = {
+        id: generateId(),
+        directiveId: directive.id,
+        dueAt: new Date(
+          Date.now() + payload.checkInIntervalMinutes * 60 * 1000
+        ).toISOString(),
+        response: 'pending',
+      };
+      await addCheckIn(checkIn);
+
+      const notifId = await scheduleNextCheckIn(directive, checkIn.id);
+      if (notifId) notifIds.current[directive.id] = notifId;
+
+      await load();
+    },
+    [load]
+  );
+
+  const respondToCheckIn = useCallback(
+    async (checkInId: string, response: 'success' | 'failure') => {
+      const now = new Date().toISOString();
+      await updateCheckIn(checkInId, { response, respondedAt: now });
+
+      // Find the directive so we can schedule the next check-in
+      const ci = checkIns.find((c) => c.id === checkInId);
+      if (!ci) {
+        await load();
+        return;
+      }
+      const directive = directives.find((d) => d.id === ci.directiveId);
+      if (!directive || !directive.active) {
+        await load();
+        return;
+      }
+
+      if (response === 'success') {
+        // Schedule next check-in
+        const nextCheckIn: CheckIn = {
+          id: generateId(),
+          directiveId: directive.id,
+          dueAt: new Date(
+            Date.now() + directive.checkInIntervalMinutes * 60 * 1000
+          ).toISOString(),
+          response: 'pending',
+        };
+        await addCheckIn(nextCheckIn);
+        const notifId = await scheduleNextCheckIn(directive, nextCheckIn.id);
+        if (notifId) notifIds.current[directive.id] = notifId;
+      }
+      // On failure: caller handles next action (start fresh, pause, give up)
+
+      await load();
+    },
+    [checkIns, directives, load]
+  );
+
+  const scheduleNewInterval = useCallback(
+    async (directiveId: string) => {
+      const directive = directives.find((d) => d.id === directiveId);
+      if (!directive || !directive.active) return;
+
+      const nextCheckIn: CheckIn = {
+        id: generateId(),
+        directiveId: directive.id,
+        dueAt: new Date(
+          Date.now() + directive.checkInIntervalMinutes * 60 * 1000
+        ).toISOString(),
+        response: 'pending',
+      };
+      await addCheckIn(nextCheckIn);
+      const notifId = await scheduleNextCheckIn(directive, nextCheckIn.id);
+      if (notifId) notifIds.current[directive.id] = notifId;
+      await load();
+    },
+    [directives, load]
+  );
+
+  const pauseDirective = useCallback(
+    async (id: string) => {
+      const now = new Date().toISOString();
+      await updateDirective(id, { pausedAt: now, active: false });
+      // Cancel pending notifications
+      if (notifIds.current[id]) {
+        await cancelDirectiveNotifications([notifIds.current[id]]);
+        delete notifIds.current[id];
+      }
+      // Mark pending check-in as skipped
+      const pending = pendingCheckInForDirective(id, checkIns);
+      if (pending) {
+        await updateCheckIn(pending.id, { response: 'skipped', respondedAt: now });
+      }
+      await load();
+    },
+    [checkIns, load]
+  );
+
+  const resumeDirective = useCallback(
+    async (id: string) => {
+      await updateDirective(id, { active: true, pausedAt: undefined });
+      await scheduleNewInterval(id);
+    },
+    [scheduleNewInterval]
+  );
+
+  const deleteDirective = useCallback(
+    async (id: string) => {
+      if (notifIds.current[id]) {
+        await cancelDirectiveNotifications([notifIds.current[id]]);
+        delete notifIds.current[id];
+      }
+      await storageDeleteDirective(id);
+      await load();
+    },
+    [load]
+  );
+
+  const getStreak = useCallback(
+    (directiveId: string) => computeStreak(directiveId, checkIns),
+    [checkIns]
+  );
+
+  const getDueCheckIn = useCallback(
+    (directiveId: string): CheckIn | undefined => {
+      const now = Date.now();
+      return checkIns.find(
+        (c) =>
+          c.directiveId === directiveId &&
+          c.response === 'pending' &&
+          new Date(c.dueAt).getTime() <= now
+      );
+    },
+    [checkIns]
+  );
+
+  const getPendingCheckIn = useCallback(
+    (directiveId: string): CheckIn | undefined =>
+      pendingCheckInForDirective(directiveId, checkIns),
+    [checkIns]
+  );
+
+  return (
+    <AppContext.Provider
+      value={{
+        directives,
+        checkIns,
+        settings,
+        isLoading,
+        addDirective,
+        respondToCheckIn,
+        pauseDirective,
+        resumeDirective,
+        deleteDirective,
+        getStreak,
+        getDueCheckIn,
+        getPendingCheckIn,
+        refresh,
+      }}
+    >
+      {children}
+    </AppContext.Provider>
+  );
+}
+
+export function useApp(): AppContextType {
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useApp must be used within AppProvider');
+  return ctx;
+}
