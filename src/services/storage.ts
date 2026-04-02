@@ -143,3 +143,11 @@ export function intervalLabel(minutes: number): string {
   if (minutes === 1440) return '1 day';
   return `${minutes / 1440} days`;
 }
+
+export function windowLabel(minutes: number): string {
+  if (minutes < 60) return `${minutes}-min windows`;
+  if (minutes === 60) return '1-hour windows';
+  if (minutes < 1440) return `${minutes / 60}-hour windows`;
+  if (minutes === 1440) return 'daily windows';
+  return `${minutes / 1440}-day windows`;
+}

@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useApp } from '../context/AppContext';
+import { windowLabel } from '../services/storage';
 import { Directive } from '../types';
-import { intervalLabel } from '../services/storage';
 import {
   colors,
   fontSizes,
@@ -12,7 +12,6 @@ import {
   shadows,
   spacing,
 } from '../utils/theme';
-import { formatDistanceToNowStrict } from 'date-fns';
 
 interface Props {
   directive: Directive;
@@ -20,8 +19,39 @@ interface Props {
   onCheckIn: (checkInId: string) => void;
 }
 
+function elapsedProgressLabel(elapsedMin: number, totalMin: number): string {
+  const e = Math.round(elapsedMin);
+  if (totalMin <= 60) return `${e} / ${totalMin} min`;
+  const eH = Math.floor(e / 60);
+  const eM = e % 60;
+  const tH = totalMin / 60;
+  const elapsedStr = eH > 0 ? `${eH}h${eM > 0 ? ` ${eM}m` : ''}` : `${eM}m`;
+  return `${elapsedStr} / ${tH}h`;
+}
+
+function computeProgress(
+  dueNow: boolean,
+  pending: { dueAt: string } | undefined,
+  intervalMinutes: number,
+): number {
+  if (dueNow) return 1;
+  if (!pending) return 0;
+  const dueMs = new Date(pending.dueAt).getTime();
+  const totalMs = intervalMinutes * 60 * 1000;
+  const startMs = dueMs - totalMs;
+  return Math.min(Math.max((Date.now() - startMs) / totalMs, 0), 1);
+}
+
 export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) {
   const { getStreak, getDueCheckIn, getPendingCheckIn } = useApp();
+
+  // Tick every second for the elapsed label
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1_000);
+    return () => clearInterval(id);
+  }, []);
+
   const streak = getStreak(directive.id);
   const dueNow = getDueCheckIn(directive.id);
   const pending = getPendingCheckIn(directive.id);
@@ -29,140 +59,219 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
 
   const isDo = directive.type === 'DO';
   const accentColor = isDo ? colors.do : colors.dont;
-  const accentLightColor = isDo ? colors.doLight : colors.dontLight;
+  const accentGlow = isDo ? colors.doGlow : colors.dontGlow;
 
-  const nextCheckInLabel = pending
-    ? dueNow
-      ? 'Due now'
-      : `in ${formatDistanceToNowStrict(new Date(pending.dueAt))}`
-    : null;
+  // Elapsed label — updates every second
+  const elapsedLabel = useMemo(() => {
+    if (!pending || dueNow) return null;
+    const dueMs = new Date(pending.dueAt).getTime();
+    const totalMs = directive.checkInIntervalMinutes * 60 * 1000;
+    const startMs = dueMs - totalMs;
+    const elapsedMin = Math.max((Date.now() - startMs) / 60_000, 0);
+    return elapsedProgressLabel(elapsedMin, directive.checkInIntervalMinutes);
+  }, [pending, dueNow, directive.checkInIntervalMinutes, tick]);
+
+  // ── Animated progress bar ──────────────────────────────────────────────────
+  // We measure the track width, then animate a pixel value.
+  const [trackWidth, setTrackWidth] = useState(0);
+  const animatedWidth = useRef(new Animated.Value(0)).current;
+
+  // Recompute target progress every second and animate toward it
+  useEffect(() => {
+    if (trackWidth === 0) return;
+    const p = computeProgress(!!dueNow, pending, directive.checkInIntervalMinutes);
+    const barColor =
+      p >= 0.9 ? colors.failure : p >= 0.75 ? colors.warning : accentColor;
+
+    Animated.timing(animatedWidth, {
+      toValue: p * trackWidth,
+      duration: 1_000,       // glide over exactly one second — matches the tick
+      useNativeDriver: false, // width is a layout prop, can't use native driver
+    }).start();
+  }, [tick, trackWidth, dueNow, pending, directive.checkInIntervalMinutes]);
+
+  // Bar color derived from current progress (non-animated, changes per tick)
+  const progress = computeProgress(!!dueNow, pending, directive.checkInIntervalMinutes);
+  const barColor =
+    progress >= 0.9 ? colors.failure : progress >= 0.75 ? colors.warning : accentColor;
 
   return (
     <Pressable
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        styles.card,
+        dueNow && { backgroundColor: accentGlow, borderColor: accentColor },
+        pressed && styles.pressed,
+      ]}
       onPress={onPress}
     >
-      {/* Type badge */}
-      <View style={[styles.badge, { backgroundColor: accentLightColor }]}>
-        <Text style={[styles.badgeText, { color: accentColor }]}>
-          {isDo ? 'DO' : "DON'T"}
-        </Text>
-      </View>
+      {/* Left accent stripe */}
+      <View style={[styles.stripe, { backgroundColor: accentColor }]} />
 
-      {/* Main content */}
-      <View style={styles.body}>
-        <Text style={styles.action} numberOfLines={2}>
-          {directive.action}
-        </Text>
+      {/* Content */}
+      <View style={styles.content}>
+        {/* Top row: action + streak */}
+        <View style={styles.topRow}>
+          <Text style={styles.action} numberOfLines={2}>
+            {directive.action}
+          </Text>
+          {streak > 0 && (
+            <View style={[styles.streakPill, { backgroundColor: accentGlow }]}>
+              <Text style={[styles.streakText, { color: accentColor }]}>
+                🔥 {streak}
+              </Text>
+            </View>
+          )}
+        </View>
 
-        <View style={styles.meta}>
-          <View style={styles.metaItem}>
-            <Ionicons name="flame" size={14} color={colors.warning} />
-            <Text style={styles.metaText}>
-              {streak} {streak === 1 ? 'check-in' : 'check-ins'}
-            </Text>
-          </View>
+        {/* Meta row */}
+        <View style={styles.metaRow}>
+          <Text style={[styles.typeTag, { color: accentColor }]}>
+            {isDo ? 'DO' : "DON'T"}
+          </Text>
+          <Text style={styles.metaDot}>·</Text>
+          <Text style={styles.metaText}>
+            {windowLabel(directive.checkInIntervalMinutes)}
+          </Text>
 
-          <Text style={styles.dot}>·</Text>
-
-          <View style={styles.metaItem}>
-            <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-            <Text style={styles.metaText}>
-              every {intervalLabel(directive.checkInIntervalMinutes)}
-            </Text>
-          </View>
+          {!dueNow && elapsedLabel && (
+            <>
+              <Text style={styles.metaDot}>·</Text>
+              <Text style={styles.metaText}>{elapsedLabel}</Text>
+            </>
+          )}
 
           {isPaused && (
             <>
-              <Text style={styles.dot}>·</Text>
-              <View style={styles.metaItem}>
-                <Ionicons name="pause-circle-outline" size={14} color={colors.textMuted} />
-                <Text style={styles.metaText}>paused</Text>
-              </View>
+              <Text style={styles.metaDot}>·</Text>
+              <Ionicons name="pause-circle" size={12} color={colors.textMuted} />
+              <Text style={styles.metaText}>paused</Text>
+            </>
+          )}
+
+          {dueNow && (
+            <>
+              <Text style={styles.metaDot}>·</Text>
+              <Text style={[styles.dueLabel, { color: accentColor }]}>DUE NOW</Text>
             </>
           )}
         </View>
+
+        {/* Animated progress bar */}
+        {!isPaused && (
+          <View
+            style={styles.progressTrack}
+            onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+          >
+            <Animated.View
+              style={[
+                styles.progressFill,
+                { width: animatedWidth, backgroundColor: barColor },
+              ]}
+            />
+          </View>
+        )}
+
+        {/* Check-in button when due */}
+        {!isPaused && dueNow && (
+          <Pressable
+            style={[styles.checkInBtn, { backgroundColor: accentColor }]}
+            onPress={() => onCheckIn(dueNow.id)}
+          >
+            <Ionicons name="flash" size={16} color={colors.background} />
+            <Text style={styles.checkInBtnText}>Check in now</Text>
+          </Pressable>
+        )}
       </View>
-
-      {/* Check-in button or countdown */}
-      {!isPaused && (
-        <View style={styles.right}>
-          {dueNow ? (
-            <Pressable
-              style={[styles.checkInBtn, { backgroundColor: accentColor }]}
-              onPress={() => onCheckIn(dueNow.id)}
-              hitSlop={4}
-            >
-              <Text style={styles.checkInBtnText}>Check in</Text>
-            </Pressable>
-          ) : nextCheckInLabel ? (
-            <Text style={styles.countdown}>{nextCheckInLabel}</Text>
-          ) : null}
-        </View>
-      )}
-
-      <Ionicons
-        name="chevron-forward"
-        size={18}
-        color={colors.border}
-        style={styles.chevron}
-      />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.card,
     borderRadius: radius.lg,
-    padding: spacing.md,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    ...shadows.sm,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
+    ...shadows.sm,
   },
-  pressed: { opacity: 0.85 },
-  badge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.sm,
-    alignSelf: 'flex-start',
-    minWidth: 52,
-    alignItems: 'center',
+  pressed: { opacity: 0.8 },
+  stripe: { width: 4 },
+  content: {
+    flex: 1,
+    padding: spacing.md,
+    gap: spacing.sm,
   },
-  badgeText: {
-    fontSize: fontSizes.xs,
-    fontWeight: fontWeights.black,
-    letterSpacing: 0.5,
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
   },
-  body: { flex: 1 },
   action: {
-    fontSize: fontSizes.md,
-    fontWeight: fontWeights.semibold,
+    flex: 1,
+    fontSize: fontSizes.lg,
+    fontWeight: fontWeights.bold,
     color: colors.text,
-    marginBottom: 4,
+    letterSpacing: -0.3,
+    lineHeight: 24,
   },
-  meta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 },
-  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  metaText: { fontSize: fontSizes.xs, color: colors.textSecondary },
-  dot: { color: colors.textMuted, fontSize: fontSizes.xs },
-  right: { alignItems: 'flex-end', gap: spacing.xs },
-  checkInBtn: {
+  streakPill: {
     paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
+    paddingVertical: 3,
     borderRadius: radius.full,
+    alignSelf: 'flex-start',
   },
-  checkInBtnText: {
-    color: colors.white,
-    fontSize: fontSizes.xs,
+  streakText: {
+    fontSize: fontSizes.sm,
     fontWeight: fontWeights.bold,
   },
-  countdown: {
-    fontSize: fontSizes.xs,
-    color: colors.textMuted,
-    textAlign: 'right',
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 4,
   },
-  chevron: { marginLeft: -4 },
+  typeTag: {
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.black,
+    letterSpacing: 0.8,
+  },
+  metaDot: {
+    color: colors.textMuted,
+    fontSize: fontSizes.xs,
+  },
+  metaText: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
+  },
+  dueLabel: {
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.black,
+    letterSpacing: 0.8,
+  },
+  progressTrack: {
+    height: 3,
+    backgroundColor: colors.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 3,
+    borderRadius: 2,
+  },
+  checkInBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+  },
+  checkInBtnText: {
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.black,
+    color: colors.background,
+    letterSpacing: 0.3,
+  },
 });

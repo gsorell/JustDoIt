@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { format } from 'date-fns';
 import React from 'react';
 import {
   ActivityIndicator,
@@ -13,44 +14,80 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import DirectiveCard from '../components/DirectiveCard';
 import { useApp } from '../context/AppContext';
 import { RootStackParamList } from '../types';
-import { colors, fontSizes, fontWeights, spacing } from '../utils/theme';
+import { colors, fontSizes, fontWeights, radius, spacing } from '../utils/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
 export default function HomeScreen({ navigation }: Props) {
-  const { directives, isLoading } = useApp();
+  const { directives, isLoading, getDueCheckIn } = useApp();
   const active = directives.filter((d) => d.active || d.pausedAt);
+
+  const dueCount = active.filter((d) => !!getDueCheckIn(d.id)).length;
+  const doCount = active.filter((d) => d.type === 'DO').length;
+  const dontCount = active.filter((d) => d.type === 'DONT').length;
+
+  const today = format(new Date(), 'EEEE, MMM d');
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Just Do It</Text>
+        <View style={styles.headerText}>
+          <Text style={styles.date}>{today}</Text>
+          <Text style={styles.title}>Just Do It</Text>
+        </View>
         <Pressable
           style={styles.addBtn}
           onPress={() => navigation.navigate('AddDirective')}
           hitSlop={8}
         >
-          <Ionicons name="add" size={28} color={colors.white} />
+          <Ionicons name="add" size={26} color={colors.background} />
         </Pressable>
       </View>
 
+      {/* Stats bar */}
+      {active.length > 0 && !isLoading && (
+        <View style={styles.statsBar}>
+          {dueCount > 0 && (
+            <View style={styles.duePill}>
+              <View style={styles.dueDot} />
+              <Text style={styles.duePillText}>
+                {dueCount} due now
+              </Text>
+            </View>
+          )}
+          {doCount > 0 && (
+            <View style={[styles.statPill, { borderColor: colors.do }]}>
+              <Text style={[styles.statPillText, { color: colors.do }]}>
+                {doCount} DO
+              </Text>
+            </View>
+          )}
+          {dontCount > 0 && (
+            <View style={[styles.statPill, { borderColor: colors.dont }]}>
+              <Text style={[styles.statPillText, { color: colors.dont }]}>
+                {dontCount} DON'T
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Content */}
       {isLoading ? (
-        <ActivityIndicator
-          style={{ flex: 1 }}
-          color={colors.accent}
-          size="large"
-        />
+        <ActivityIndicator style={{ flex: 1 }} color={colors.accent} size="large" />
       ) : active.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>🎯</Text>
+          <Text style={styles.emptyEmoji}>⚡</Text>
           <Text style={styles.emptyTitle}>No commitments yet</Text>
           <Text style={styles.emptyBody}>
-            Tap + to add something you want to do — or stop doing.
+            Decide what you want to do — or stop doing.{'\n'}Hold yourself to it.
           </Text>
           <Pressable
             style={styles.emptyBtn}
             onPress={() => navigation.navigate('AddDirective')}
           >
+            <Ionicons name="add" size={18} color={colors.background} />
             <Text style={styles.emptyBtnText}>Add your first directive</Text>
           </Pressable>
         </View>
@@ -62,16 +99,9 @@ export default function HomeScreen({ navigation }: Props) {
           renderItem={({ item }) => (
             <DirectiveCard
               directive={item}
-              onPress={() =>
-                navigation.navigate('DirectiveDetail', {
-                  directiveId: item.id,
-                })
-              }
+              onPress={() => navigation.navigate('DirectiveDetail', { directiveId: item.id })}
               onCheckIn={(checkInId) =>
-                navigation.navigate('CheckIn', {
-                  directiveId: item.id,
-                  checkInId,
-                })
+                navigation.navigate('CheckIn', { directiveId: item.id, checkInId })
               }
             />
           )}
@@ -83,30 +113,84 @@ export default function HomeScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+  },
+  headerText: { gap: 2 },
+  date: {
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.medium,
+    color: colors.textSecondary,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   title: {
     fontSize: fontSizes.xl,
     fontWeight: fontWeights.black,
     color: colors.text,
-    letterSpacing: -0.5,
+    letterSpacing: -0.8,
   },
   addBtn: {
     backgroundColor: colors.accent,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  list: { padding: spacing.md, gap: spacing.sm },
+
+  statsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    gap: spacing.xs,
+  },
+  duePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255,180,0,0.12)',
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,180,0,0.3)',
+  },
+  dueDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.warning,
+  },
+  duePillText: {
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.bold,
+    color: colors.warning,
+  },
+  statPill: {
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 4,
+    borderWidth: 1,
+  },
+  statPillText: {
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.bold,
+    letterSpacing: 0.5,
+  },
+
+  list: {
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+
   empty: {
     flex: 1,
     alignItems: 'center',
@@ -114,12 +198,12 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     gap: spacing.sm,
   },
-  emptyIcon: { fontSize: 56 },
+  emptyEmoji: { fontSize: 64, marginBottom: spacing.sm },
   emptyTitle: {
-    fontSize: fontSizes.lg,
-    fontWeight: fontWeights.bold,
+    fontSize: fontSizes.xl,
+    fontWeight: fontWeights.black,
     color: colors.text,
-    marginTop: spacing.sm,
+    letterSpacing: -0.5,
   },
   emptyBody: {
     fontSize: fontSizes.md,
@@ -130,13 +214,16 @@ const styles = StyleSheet.create({
   emptyBtn: {
     marginTop: spacing.md,
     backgroundColor: colors.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm + 4,
-    borderRadius: 999,
+    borderRadius: radius.full,
   },
   emptyBtnText: {
-    color: colors.white,
-    fontWeight: fontWeights.semibold,
+    color: colors.background,
+    fontWeight: fontWeights.bold,
     fontSize: fontSizes.md,
   },
 });
