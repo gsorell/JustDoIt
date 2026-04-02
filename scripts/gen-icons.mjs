@@ -1,92 +1,36 @@
 import sharp from 'sharp';
 
 const BG = { r: 15, g: 15, b: 24, alpha: 1 };
-const SOURCE_LOGO = 'assets/logo.png';
+const TRANSPARENT = { r: 0, g: 0, b: 0, alpha: 0 };
 
-// Launcher icons should use the mark only (no wordmark text), otherwise text gets blurry at small sizes.
-async function makeSymbolSource() {
-  const trimmed = await sharp(SOURCE_LOGO).trim({ threshold: 8 }).png().toBuffer();
-  const meta = await sharp(trimmed).metadata();
-  if (!meta.width || !meta.height) {
-    throw new Error('Unable to read source logo dimensions.');
-  }
+// Trim transparent border from logo so the mark fills the canvas edge-to-edge.
+const source = await sharp('assets/logo.png').trim({ threshold: 10 }).png().toBuffer();
 
-  // The symbol sits above the wordmark in the source artwork.
-  const symbolRegionHeight = Math.round(meta.height * 0.58);
-  const symbolRegion = await sharp(trimmed)
-    .extract({ left: 0, top: 0, width: meta.width, height: symbolRegionHeight })
-    .trim({ threshold: 8 })
-    .png()
+async function composite(markBuf, size, bg, markFraction, outPath) {
+  const markSize = Math.round(size * markFraction);
+  const offset = Math.round((size - markSize) / 2);
+  const resized = await sharp(markBuf)
+    .resize(markSize, markSize, { fit: 'contain', kernel: 'lanczos3', background: TRANSPARENT })
     .toBuffer();
-
-  return symbolRegion;
-}
-
-// For maskable icons: logo occupies the inner 75% (safe zone for circular crop)
-async function makeMaskable(symbolBuffer, size, outPath) {
-  const markSize = Math.round(size * 0.82);
-  const padding = Math.round((size - markSize) / 2);
-
-  const logoResized = await sharp(symbolBuffer)
-    .resize(markSize, markSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .toBuffer();
-
-  await sharp({
-    create: { width: size, height: size, channels: 4, background: BG },
-  })
-    .composite([{ input: logoResized, left: padding, top: padding }])
-    .png()
-    .toFile(outPath);
-
-  console.log(`✓ ${outPath}`);
-}
-
-// Android adaptive foreground should be transparent with only the mark.
-async function makeAdaptiveForeground(symbolBuffer, size, outPath) {
-  const markSize = Math.round(size * 0.72);
-  const padding = Math.round((size - markSize) / 2);
-
-  const logoResized = await sharp(symbolBuffer)
-    .resize(markSize, markSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .toBuffer();
-
-  await sharp({
-    create: { width: size, height: size, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
-  })
-    .composite([{ input: logoResized, left: padding, top: padding }])
-    .png()
-    .toFile(outPath);
-
-  console.log(`✓ ${outPath}`);
-}
-
-// Plain icon (no padding needed for favicon / apple touch)
-async function makeIcon(symbolBuffer, size, outPath) {
-  await sharp({
-    create: { width: size, height: size, channels: 4, background: BG },
-  })
-    .composite([
-      {
-        input: await sharp(symbolBuffer)
-          .resize(Math.round(size * 0.84), Math.round(size * 0.84), {
-            fit: 'contain',
-            background: { r: 0, g: 0, b: 0, alpha: 0 },
-          })
-          .toBuffer(),
-        left: Math.round(size * 0.08),
-        top: Math.round(size * 0.08),
-      },
-    ])
+  await sharp({ create: { width: size, height: size, channels: 4, background: bg } })
+    .composite([{ input: resized, left: offset, top: offset }])
     .png()
     .toFile(outPath);
   console.log(`✓ ${outPath}`);
 }
 
-const symbolSource = await makeSymbolSource();
+// icon.png / apple-touch-icon — dark bg, used by iOS and Expo fallback
+await composite(source, 1024, BG, 0.82, 'assets/icon.png');
+await composite(source, 180,  BG, 0.82, 'assets/apple-touch-icon.png');
+await composite(source, 32,   BG, 0.82, 'assets/favicon-32.png');
 
-await makeIcon(symbolSource, 1024, 'assets/icon.png');
-await makeAdaptiveForeground(symbolSource, 1024, 'assets/adaptive-icon.png');
-await makeMaskable(symbolSource, 512, 'assets/icon-512.png');
-await makeMaskable(symbolSource, 192, 'assets/icon-192.png');
-await makeIcon(symbolSource, 180, 'assets/apple-touch-icon.png');
-await makeIcon(symbolSource, 32, 'assets/favicon-32.png');
+// Android adaptive foreground — transparent so the OS applies backgroundColor from app.json
+await composite(source, 1024, TRANSPARENT, 0.72, 'assets/adaptive-icon.png');
+
+// Web "any" icons — transparent background so Chrome/Android launcher shapes it natively
+await composite(source, 512, TRANSPARENT, 0.90, 'assets/icon-512.png');
+await composite(source, 192, TRANSPARENT, 0.90, 'assets/icon-192.png');
+
+// Web "maskable" icons — full-bleed dark bg, mark within 72% safe zone
+await composite(source, 512, BG, 0.72, 'assets/icon-512-maskable.png');
+await composite(source, 192, BG, 0.72, 'assets/icon-192-maskable.png');
