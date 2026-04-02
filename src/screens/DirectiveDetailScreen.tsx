@@ -260,7 +260,7 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
           <View style={styles.titleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.typeLabel, { color: accentColor }]}>
-                {isDo ? 'JUST DO IT' : "JUST DON'T"}
+                {isDo ? 'DO IT' : "DON'T"}
               </Text>
               <Text style={styles.heroAction}>{directive.action}</Text>
             </View>

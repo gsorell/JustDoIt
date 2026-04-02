@@ -304,7 +304,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                     color={type === 'DO' ? colors.do : colors.textMuted}
                   />
                   <Text style={[styles.typeLabel, type === 'DO' && { color: colors.do }]}>
-                    Just DO it
+                    Do it
                   </Text>
                   <Text style={styles.typeDesc}>Build a positive habit</Text>
                   {type === 'DO' && (
@@ -517,7 +517,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                       color={accentColor}
                     />
                     <Text style={[styles.summaryType, { color: accentColor }]}>
-                      {isDo ? 'JUST DO IT' : "JUST DON'T"}
+                      {isDo ? 'DO IT' : "DON'T"}
                     </Text>
                   </View>
                   <Text style={styles.summaryAction}>{action}</Text>

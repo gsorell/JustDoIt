@@ -34,7 +34,7 @@ export default function HomeScreen({ navigation }: Props) {
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.date}>{today}</Text>
-          <Text style={styles.title}>Just Do It</Text>
+          <Text style={styles.title}>Cadence</Text>
         </View>
         <Pressable
           style={styles.addBtn}

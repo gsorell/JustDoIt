@@ -90,13 +90,13 @@ function SuccessOverlay({ streak, isDo, accentColor, action, cleanTimeMinutes, o
     let message: string;
     if (isDo) {
       message = streak === 1
-        ? `Just checked in on "${action}" for the first time. Starting the streak. 🔥 #JustDoIt`
-        : `${streak} check-ins in a row on "${action}". Building the habit. 🔥 #JustDoIt`;
+        ? `Just checked in on "${action}" for the first time. Starting the streak. 🔥 #Cadence`
+        : `${streak} check-ins in a row on "${action}". Building the habit. 🔥 #Cadence`;
     } else {
       const cleanStr = cleanTimeMinutes ? ` — ${formatCleanTime(cleanTimeMinutes)} total clean time` : '';
       message = streak === 1
-        ? `Just completed my first clean window avoiding "${action}". The streak begins.${cleanStr} 💪 #JustDoIt`
-        : `${streak} clean windows in a row avoiding "${action}"${cleanStr}. 💪 #JustDoIt`;
+        ? `Just completed my first clean window avoiding "${action}". The streak begins.${cleanStr} 💪 #Cadence`
+        : `${streak} clean windows in a row avoiding "${action}"${cleanStr}. 💪 #Cadence`;
     }
     Share.share({ message });
   }
@@ -370,7 +370,7 @@ export default function CheckInScreen({ route, navigation }: Props) {
       <View style={styles.body}>
         <View style={[styles.badge, { borderColor: accentColor }]}>
           <Text style={[styles.badgeText, { color: accentColor }]}>
-            {isDo ? 'JUST DO IT' : "JUST DON'T"}
+            {isDo ? 'DO IT' : "DON'T"}
           </Text>
         </View>
         <Text style={styles.question}>{question}</Text>
