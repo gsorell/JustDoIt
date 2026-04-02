@@ -36,11 +36,13 @@ async function areWebPermissionsGranted(): Promise<boolean> {
 
 async function scheduleWebNotification(
   directive: Directive,
-  checkInId: string
+  checkInId: string,
+  delayMsOverride?: number
 ): Promise<string | null> {
   if (!(await areWebPermissionsGranted())) return null;
 
-  const delayMs = directive.checkInIntervalMinutes * 60 * 1000;
+  const delayMs =
+    delayMsOverride ?? directive.checkInIntervalMinutes * 60 * 1000;
   const label = intervalLabel(directive.checkInIntervalMinutes);
   const isAvoid = directive.type === 'DONT';
   const title = isAvoid ? "How's it going? 🚫" : 'Time to check in! ✅';
@@ -106,14 +108,18 @@ export async function areNotificationsGranted(): Promise<boolean> {
  */
 export async function scheduleNextCheckIn(
   directive: Directive,
-  checkInId: string
+  checkInId: string,
+  options?: { delayMs?: number }
 ): Promise<string | null> {
-  if (Platform.OS === 'web') return scheduleWebNotification(directive, checkInId);
+  if (Platform.OS === 'web') {
+    return scheduleWebNotification(directive, checkInId, options?.delayMs);
+  }
 
   const granted = await areNotificationsGranted();
   if (!granted) return null;
 
-  const delaySeconds = directive.checkInIntervalMinutes * 60;
+  const delayMs = options?.delayMs ?? directive.checkInIntervalMinutes * 60 * 1000;
+  const delaySeconds = Math.max(1, Math.ceil(delayMs / 1000));
   const label = intervalLabel(directive.checkInIntervalMinutes);
   const isAvoid = directive.type === 'DONT';
 

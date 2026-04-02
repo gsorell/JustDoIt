@@ -168,9 +168,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const scheduleNewInterval = useCallback(
-    async (directiveId: string) => {
+    async (directiveId: string, options?: { force?: boolean }) => {
       const directive = directives.find((d) => d.id === directiveId);
-      if (!directive || !directive.active) return;
+      if (!directive) return;
+      if (!directive.active && !options?.force) return;
 
       const nextCheckIn: CheckIn = {
         id: generateId(),
@@ -197,22 +198,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await cancelDirectiveNotifications([notifIds.current[id]]);
         delete notifIds.current[id];
       }
-      // Mark pending check-in as skipped
-      const pending = pendingCheckInForDirective(id, checkIns);
-      if (pending) {
-        await updateCheckIn(pending.id, { response: 'skipped', respondedAt: now });
-      }
       await load();
     },
-    [checkIns, load]
+    [load]
   );
 
   const resumeDirective = useCallback(
     async (id: string) => {
+      const directive = directives.find((d) => d.id === id);
+      if (!directive) return;
+
+      const pausedAtMs = directive.pausedAt
+        ? new Date(directive.pausedAt).getTime()
+        : null;
+      const nowMs = Date.now();
+      const pausedDurationMs = pausedAtMs ? Math.max(nowMs - pausedAtMs, 0) : 0;
+
       await updateDirective(id, { active: true, pausedAt: undefined });
-      await scheduleNewInterval(id);
+
+      const pending = pendingCheckInForDirective(id, checkIns);
+      if (pending) {
+        const shiftedDueMs =
+          new Date(pending.dueAt).getTime() + pausedDurationMs;
+        const shiftedDueAt = new Date(shiftedDueMs).toISOString();
+        await updateCheckIn(pending.id, { dueAt: shiftedDueAt });
+
+        const notifId = await scheduleNextCheckIn(
+          { ...directive, active: true, pausedAt: undefined },
+          pending.id,
+          { delayMs: Math.max(shiftedDueMs - nowMs, 0) }
+        );
+        if (notifId) notifIds.current[id] = notifId;
+
+        await load();
+        return;
+      }
+
+      await scheduleNewInterval(id, { force: true });
     },
-    [scheduleNewInterval]
+    [checkIns, directives, load, scheduleNewInterval]
   );
 
   const deleteDirective = useCallback(
