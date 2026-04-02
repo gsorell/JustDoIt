@@ -5,6 +5,7 @@ import React from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -29,20 +30,16 @@ export default function HomeScreen({ navigation }: Props) {
   const today = format(new Date(), 'EEEE, MMM d');
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerText}>
-          <Text style={styles.date}>{today}</Text>
-          <Text style={styles.title}>Cadence</Text>
-        </View>
-        <Pressable
-          style={styles.addBtn}
-          onPress={() => navigation.navigate('AddDirective')}
-          hitSlop={8}
-        >
-          <Ionicons name="add" size={26} color={colors.background} />
-        </Pressable>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+
+      {/* Hero logo block — centered, owns its own space */}
+      <View style={styles.hero}>
+        <Image
+          source={require('../../assets/logo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <Text style={styles.date}>{today}</Text>
       </View>
 
       {/* Stats bar */}
@@ -107,6 +104,15 @@ export default function HomeScreen({ navigation }: Props) {
           )}
         />
       )}
+
+      {/* FAB — bottom right, thumb-reachable */}
+      <Pressable
+        style={styles.addBtn}
+        onPress={() => navigation.navigate('AddDirective')}
+        hitSlop={8}
+      >
+        <Ionicons name="add" size={28} color={colors.background} />
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -114,42 +120,46 @@ export default function HomeScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
 
-  header: {
-    flexDirection: 'row',
+  addBtn: {
+    position: 'absolute',
+    bottom: spacing.lg,
+    right: spacing.lg,
+    zIndex: 10,
+    backgroundColor: colors.accent,
+    width: 56,
+    height: 56,
+    borderRadius: radius.full,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
+    justifyContent: 'center',
+    shadowColor: colors.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  headerText: { gap: 2 },
+  hero: {
+    alignItems: 'center',
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.lg,
+    gap: spacing.sm,
+  },
+  logo: {
+    height: 200,
+    width: 200,
+  },
   date: {
     fontSize: fontSizes.xs,
     fontWeight: fontWeights.medium,
     color: colors.textSecondary,
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
-  },
-  title: {
-    fontSize: fontSizes.xl,
-    fontWeight: fontWeights.black,
-    color: colors.text,
-    letterSpacing: -0.8,
-  },
-  addBtn: {
-    backgroundColor: colors.accent,
-    width: 44,
-    height: 44,
-    borderRadius: radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 
   statsBar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.md,
     gap: spacing.xs,
   },
   duePill: {

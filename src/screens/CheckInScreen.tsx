@@ -87,16 +87,17 @@ function SuccessOverlay({ streak, isDo, accentColor, action, cleanTimeMinutes, o
   }, []);
 
   function handleShare() {
+    const link = 'https://chunkitdoit.netlify.app/';
     let message: string;
     if (isDo) {
       message = streak === 1
-        ? `Just checked in on "${action}" for the first time. Starting the streak. 🔥 #Cadence`
-        : `${streak} check-ins in a row on "${action}". Building the habit. 🔥 #Cadence`;
+        ? `Just checked in on "${action}" for the first time. Starting the streak. 🔥\n\n#Cadence — track your commitments: ${link}`
+        : `${streak} check-ins in a row on "${action}". Building the habit. 🔥\n\n#Cadence — track your commitments: ${link}`;
     } else {
       const cleanStr = cleanTimeMinutes ? ` — ${formatCleanTime(cleanTimeMinutes)} total clean time` : '';
       message = streak === 1
-        ? `Just completed my first clean window avoiding "${action}". The streak begins.${cleanStr} 💪 #Cadence`
-        : `${streak} clean windows in a row avoiding "${action}"${cleanStr}. 💪 #Cadence`;
+        ? `Just completed my first clean window avoiding "${action}". The streak begins.${cleanStr} 💪\n\n#Cadence — track your commitments: ${link}`
+        : `${streak} clean windows in a row avoiding "${action}"${cleanStr}. 💪\n\n#Cadence — track your commitments: ${link}`;
     }
     Share.share({ message });
   }

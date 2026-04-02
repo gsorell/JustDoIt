@@ -149,7 +149,6 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
   const { directives, checkIns, getStreak, pauseDirective, resumeDirective, deleteDirective } =
     useApp();
 
-  // All hooks must be declared before any early return
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [tick, setTick] = useState(0);
 
@@ -165,27 +164,22 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
     return () => clearInterval(id);
   }, []);
 
-  if (!directive) return null;
+  // Derived check-in data — computed before early return so hook count stays constant
+  const respondedCheckIns = useMemo(() =>
+    checkIns
+      .filter((c) => c.directiveId === directiveId && c.response !== 'pending')
+      .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()),
+    [checkIns, directiveId]
+  );
 
-  const isDo = directive.type === 'DO';
-  const isPaused = !directive.active && !!directive.pausedAt;
-  const accentColor = isDo ? colors.do : colors.dont;
-  const accentGlow = isDo ? colors.doGlow : colors.dontGlow;
-
-  // Check-in data
-  const respondedCheckIns = checkIns
-    .filter((c) => c.directiveId === directiveId && c.response !== 'pending')
-    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()); // oldest first
-
-  const historyCheckIns = [...respondedCheckIns].reverse(); // newest first for history list
-
-  const pendingCheckIn = checkIns.find(
-    (c) => c.directiveId === directiveId && c.response === 'pending',
+  const pendingCheckIn = useMemo(() =>
+    checkIns.find((c) => c.directiveId === directiveId && c.response === 'pending'),
+    [checkIns, directiveId]
   );
 
   // Live timer values — recomputed every tick
   const { elapsedMs, remainingMs, windowProgress } = useMemo(() => {
-    if (!pendingCheckIn) return { elapsedMs: 0, remainingMs: 0, windowProgress: 0 };
+    if (!pendingCheckIn || !directive) return { elapsedMs: 0, remainingMs: 0, windowProgress: 0 };
     const now = Date.now();
     const dueMs = new Date(pendingCheckIn.dueAt).getTime();
     const totalMs = directive.checkInIntervalMinutes * 60 * 1000;
@@ -194,7 +188,11 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
     const remaining = Math.max(dueMs - now, 0);
     const progress = Math.min(elapsed / totalMs, 1);
     return { elapsedMs: elapsed, remainingMs: remaining, windowProgress: progress };
-  }, [pendingCheckIn, directive.checkInIntervalMinutes, tick]);
+  }, [pendingCheckIn, directive, tick]);
+
+  if (!directive) return null;
+
+  const historyCheckIns = [...respondedCheckIns].reverse();
 
   const isDue = pendingCheckIn ? remainingMs === 0 : false;
 
