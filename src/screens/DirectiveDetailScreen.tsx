@@ -192,6 +192,11 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
 
   if (!directive) return null;
 
+  const isDo = directive.type === 'DO';
+  const isPaused = !directive.active && !!directive.pausedAt;
+  const accentColor = isDo ? colors.do : colors.dont;
+  const accentGlow = isDo ? colors.doGlow : colors.dontGlow;
+
   const historyCheckIns = [...respondedCheckIns].reverse();
 
   const isDue = pendingCheckIn ? remainingMs === 0 : false;
