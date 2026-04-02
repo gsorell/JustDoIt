@@ -36,16 +36,16 @@ interface Template {
 }
 
 const TEMPLATES: Template[] = [
-  { type: 'DONT', action: 'smoke',              icon: 'ban',               defaultInterval: 60,   defaultDuration: 30  },
-  { type: 'DONT', action: 'vape',               icon: 'ban',               defaultInterval: 60,   defaultDuration: 30  },
-  { type: 'DONT', action: 'drink alcohol',       icon: 'wine-outline',      defaultInterval: 1440, defaultDuration: 30  },
-  { type: 'DONT', action: 'check social media',  icon: 'phone-portrait-outline', defaultInterval: 120, defaultDuration: null },
-  { type: 'DONT', action: 'eat junk food',       icon: 'fast-food-outline', defaultInterval: 240,  defaultDuration: 90  },
   { type: 'DO',   action: 'exercise',            icon: 'barbell-outline',   defaultInterval: 1440, defaultDuration: 90  },
   { type: 'DO',   action: 'meditate',            icon: 'leaf-outline',      defaultInterval: 1440, defaultDuration: null },
   { type: 'DO',   action: 'drink water',         icon: 'water-outline',     defaultInterval: 60,   defaultDuration: null },
   { type: 'DO',   action: 'read',                icon: 'book-outline',      defaultInterval: 1440, defaultDuration: 30  },
   { type: 'DO',   action: 'journal',             icon: 'pencil-outline',    defaultInterval: 1440, defaultDuration: null },
+  { type: 'DONT', action: 'smoke',              icon: 'ban',               defaultInterval: 60,   defaultDuration: 30  },
+  { type: 'DONT', action: 'vape',               icon: 'ban',               defaultInterval: 60,   defaultDuration: 30  },
+  { type: 'DONT', action: 'drink alcohol',       icon: 'wine-outline',      defaultInterval: 1440, defaultDuration: 30  },
+  { type: 'DONT', action: 'check social media',  icon: 'phone-portrait-outline', defaultInterval: 120, defaultDuration: null },
+  { type: 'DONT', action: 'eat junk food',       icon: 'fast-food-outline', defaultInterval: 240,  defaultDuration: 90  },
 ];
 
 interface IntervalOption { label: string; sublabel: string; value: number }
@@ -304,7 +304,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                     color={type === 'DO' ? colors.do : colors.textMuted}
                   />
                   <Text style={[styles.typeLabel, type === 'DO' && { color: colors.do }]}>
-                    Do it
+                    Build It
                   </Text>
                   <Text style={styles.typeDesc}>Build a positive habit</Text>
                   {type === 'DO' && (
@@ -327,7 +327,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                     color={type === 'DONT' ? colors.dont : colors.textMuted}
                   />
                   <Text style={[styles.typeLabel, type === 'DONT' && { color: colors.dont }]}>
-                    Just DON'T
+                    Break It
                   </Text>
                   <Text style={styles.typeDesc}>Break a bad habit</Text>
                   {type === 'DONT' && (
@@ -517,7 +517,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                       color={accentColor}
                     />
                     <Text style={[styles.summaryType, { color: accentColor }]}>
-                      {isDo ? 'DO IT' : "DON'T"}
+                      {isDo ? 'BUILD IT' : 'BREAK IT'}
                     </Text>
                   </View>
                   <Text style={styles.summaryAction}>{action}</Text>
