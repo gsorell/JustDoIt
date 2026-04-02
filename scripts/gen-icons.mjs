@@ -1,15 +1,34 @@
 import sharp from 'sharp';
-import { readFileSync } from 'fs';
 
 const BG = { r: 15, g: 15, b: 24, alpha: 1 };
+const SOURCE_LOGO = 'assets/logo.png';
+
+// Launcher icons should use the mark only (no wordmark text), otherwise text gets blurry at small sizes.
+async function makeSymbolSource() {
+  const trimmed = await sharp(SOURCE_LOGO).trim({ threshold: 8 }).png().toBuffer();
+  const meta = await sharp(trimmed).metadata();
+  if (!meta.width || !meta.height) {
+    throw new Error('Unable to read source logo dimensions.');
+  }
+
+  // The symbol sits above the wordmark in the source artwork.
+  const symbolRegionHeight = Math.round(meta.height * 0.58);
+  const symbolRegion = await sharp(trimmed)
+    .extract({ left: 0, top: 0, width: meta.width, height: symbolRegionHeight })
+    .trim({ threshold: 8 })
+    .png()
+    .toBuffer();
+
+  return symbolRegion;
+}
 
 // For maskable icons: logo occupies the inner 75% (safe zone for circular crop)
-async function makeMaskable(size, outPath) {
-  const logoSize = Math.round(size * 0.75);
-  const padding = Math.round((size - logoSize) / 2);
+async function makeMaskable(symbolBuffer, size, outPath) {
+  const markSize = Math.round(size * 0.68);
+  const padding = Math.round((size - markSize) / 2);
 
-  const logoResized = await sharp('assets/logo.png')
-    .resize(logoSize, logoSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+  const logoResized = await sharp(symbolBuffer)
+    .resize(markSize, markSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .toBuffer();
 
   await sharp({
@@ -23,15 +42,32 @@ async function makeMaskable(size, outPath) {
 }
 
 // Plain icon (no padding needed for favicon / apple touch)
-async function makeIcon(size, outPath) {
-  await sharp('assets/logo.png')
-    .resize(size, size, { fit: 'contain', background: BG })
+async function makeIcon(symbolBuffer, size, outPath) {
+  await sharp({
+    create: { width: size, height: size, channels: 4, background: BG },
+  })
+    .composite([
+      {
+        input: await sharp(symbolBuffer)
+          .resize(Math.round(size * 0.76), Math.round(size * 0.76), {
+            fit: 'contain',
+            background: { r: 0, g: 0, b: 0, alpha: 0 },
+          })
+          .toBuffer(),
+        left: Math.round(size * 0.12),
+        top: Math.round(size * 0.12),
+      },
+    ])
     .png()
     .toFile(outPath);
   console.log(`✓ ${outPath}`);
 }
 
-await makeMaskable(512, 'assets/icon-512.png');
-await makeMaskable(192, 'assets/icon-192.png');
-await makeIcon(180, 'assets/apple-touch-icon.png');
-await makeIcon(32,  'assets/favicon-32.png');
+const symbolSource = await makeSymbolSource();
+
+await makeIcon(symbolSource, 1024, 'assets/icon.png');
+await makeMaskable(symbolSource, 1024, 'assets/adaptive-icon.png');
+await makeMaskable(symbolSource, 512, 'assets/icon-512.png');
+await makeMaskable(symbolSource, 192, 'assets/icon-192.png');
+await makeIcon(symbolSource, 180, 'assets/apple-touch-icon.png');
+await makeIcon(symbolSource, 32, 'assets/favicon-32.png');
