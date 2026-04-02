@@ -22,7 +22,41 @@ function AppNavigator() {
   const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
   useEffect(() => {
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web') {
+      requestNotificationPermissions();
+
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(console.error);
+
+        // Handle notification taps routed back from the service worker
+        const handleSWMessage = (event: MessageEvent) => {
+          if (event.data?.type === 'NOTIFICATION_CLICKED') {
+            const { directiveId, checkInId } = event.data as {
+              directiveId: string;
+              checkInId: string;
+            };
+            navRef.current?.navigate('CheckIn', { directiveId, checkInId });
+          }
+        };
+        navigator.serviceWorker.addEventListener('message', handleSWMessage);
+
+        // Handle taps on foreground Notification objects (before SW takes control)
+        const handleDirectClick = (event: Event) => {
+          const { directiveId, checkInId } = (
+            event as CustomEvent<{ directiveId: string; checkInId: string }>
+          ).detail;
+          navRef.current?.navigate('CheckIn', { directiveId, checkInId });
+        };
+        window.addEventListener('cadence-checkin', handleDirectClick);
+
+        return () => {
+          navigator.serviceWorker.removeEventListener('message', handleSWMessage);
+          window.removeEventListener('cadence-checkin', handleDirectClick);
+        };
+      }
+
+      return;
+    }
 
     requestNotificationPermissions();
 
