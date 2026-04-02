@@ -4,14 +4,16 @@ import { Platform } from 'react-native';
 import { Directive } from '../types';
 import { intervalLabel } from './storage';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 // ─── Web implementation ───────────────────────────────────────────────────────
 // On web we use the browser Notification API + a service worker.

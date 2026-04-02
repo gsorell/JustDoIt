@@ -11,7 +11,6 @@ self.addEventListener('message', (event) => {
       self.registration.showNotification(title, {
         body,
         data,
-        icon: '/assets/logo.png',
         badge: '/assets/favicon-32.png',
       })
     );

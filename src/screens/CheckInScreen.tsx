@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Modal,
+  Platform,
   Pressable,
   Share,
   StyleSheet,
@@ -76,12 +77,14 @@ function SuccessOverlay({ streak, isDo, accentColor, action, cleanTimeMinutes, o
   const opacity = useRef(new Animated.Value(0)).current;
   const bgOpacity = useRef(new Animated.Value(0)).current;
 
+  const nativeDriver = Platform.OS !== 'web';
+
   useEffect(() => {
     Animated.sequence([
-      Animated.timing(bgOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+      Animated.timing(bgOpacity, { toValue: 1, duration: 250, useNativeDriver: nativeDriver }),
       Animated.parallel([
-        Animated.spring(scale, { toValue: 1, friction: 5, tension: 120, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.spring(scale, { toValue: 1, friction: 5, tension: 120, useNativeDriver: nativeDriver }),
+        Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: nativeDriver }),
       ]),
     ]).start();
   }, []);
@@ -109,8 +112,7 @@ function SuccessOverlay({ streak, isDo, accentColor, action, cleanTimeMinutes, o
     <View style={StyleSheet.absoluteFill}>
       {/* Flood background */}
       <Animated.View
-        style={[StyleSheet.absoluteFill, { backgroundColor: accentColor, opacity: bgOpacity }]}
-        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, { backgroundColor: accentColor, opacity: bgOpacity, pointerEvents: 'none' }]}
       />
 
       <SafeAreaView style={successStyles.inner} edges={['top', 'bottom']}>
@@ -358,7 +360,7 @@ export default function CheckInScreen({ route, navigation }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {/* Subtle tint */}
-      <View style={[styles.tintOverlay, { backgroundColor: bgTint }]} pointerEvents="none" />
+      <View style={[styles.tintOverlay, { backgroundColor: bgTint, pointerEvents: 'none' }]} />
 
       {/* Close */}
       <Pressable style={styles.closeBtn} onPress={() => navigation.goBack()} hitSlop={12}>
