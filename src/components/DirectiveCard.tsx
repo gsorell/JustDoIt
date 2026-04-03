@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { format, parseISO } from 'date-fns';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useApp } from '../context/AppContext';
@@ -56,6 +57,7 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
   const dueNow = getDueCheckIn(directive.id);
   const pending = getPendingCheckIn(directive.id);
   const isPaused = !directive.active && !!directive.pausedAt;
+  const hasStarted = !directive.startAt || new Date(directive.startAt).getTime() <= Date.now();
 
   const isDo = directive.type === 'DO';
   const accentColor = isDo ? colors.do : colors.dont;
@@ -63,13 +65,13 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
 
   // Elapsed label — updates every second
   const elapsedLabel = useMemo(() => {
-    if (!pending || dueNow) return null;
+    if (!pending || dueNow || !hasStarted) return null;
     const dueMs = new Date(pending.dueAt).getTime();
     const totalMs = directive.checkInIntervalMinutes * 60 * 1000;
     const startMs = dueMs - totalMs;
     const elapsedMin = Math.max((Date.now() - startMs) / 60_000, 0);
     return elapsedProgressLabel(elapsedMin, directive.checkInIntervalMinutes);
-  }, [pending, dueNow, directive.checkInIntervalMinutes, tick]);
+  }, [pending, dueNow, hasStarted, directive.checkInIntervalMinutes, tick]);
 
   // ── Animated progress bar ──────────────────────────────────────────────────
   // We measure the track width, then animate a pixel value.
@@ -79,7 +81,7 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
   // Recompute target progress every second and animate toward it
   useEffect(() => {
     if (trackWidth === 0) return;
-    const p = computeProgress(!!dueNow, pending, directive.checkInIntervalMinutes);
+    const p = hasStarted ? computeProgress(!!dueNow, pending, directive.checkInIntervalMinutes) : 0;
     const barColor =
       p >= 0.9 ? colors.failure : p >= 0.75 ? colors.warning : accentColor;
 
@@ -88,10 +90,12 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
       duration: 1_000,       // glide over exactly one second — matches the tick
       useNativeDriver: false, // width is a layout prop, can't use native driver
     }).start();
-  }, [tick, trackWidth, dueNow, pending, directive.checkInIntervalMinutes]);
+  }, [tick, trackWidth, dueNow, pending, hasStarted, directive.checkInIntervalMinutes]);
 
   // Bar color derived from current progress (non-animated, changes per tick)
-  const progress = computeProgress(!!dueNow, pending, directive.checkInIntervalMinutes);
+  const progress = hasStarted
+    ? computeProgress(!!dueNow, pending, directive.checkInIntervalMinutes)
+    : 0;
   const barColor =
     progress >= 0.9 ? colors.failure : progress >= 0.75 ? colors.warning : accentColor;
 
@@ -133,7 +137,14 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
             {windowLabel(directive.checkInIntervalMinutes)}
           </Text>
 
-          {!dueNow && elapsedLabel && (
+          {!hasStarted && directive.startAt && (
+            <>
+              <Text style={styles.metaDot}>·</Text>
+              <Text style={styles.metaText}>Starts {format(parseISO(directive.startAt), 'MMM d, h:mm a')}</Text>
+            </>
+          )}
+
+          {hasStarted && !dueNow && elapsedLabel && (
             <>
               <Text style={styles.metaDot}>·</Text>
               <Text style={styles.metaText}>{elapsedLabel}</Text>
@@ -148,7 +159,7 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
             </>
           )}
 
-          {dueNow && (
+          {hasStarted && dueNow && (
             <>
               <Text style={styles.metaDot}>·</Text>
               <Text style={[styles.dueLabel, { color: accentColor }]}>DUE NOW</Text>
@@ -157,7 +168,7 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
         </View>
 
         {/* Animated progress bar */}
-        {!isPaused && (
+        {!isPaused && hasStarted && (
           <View
             style={styles.progressTrack}
             onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
@@ -172,7 +183,7 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
         )}
 
         {/* Check-in button when due */}
-        {!isPaused && dueNow && (
+        {!isPaused && hasStarted && dueNow && (
           <Pressable
             style={[styles.checkInBtn, { backgroundColor: accentColor }]}
             onPress={() => onCheckIn(dueNow.id)}

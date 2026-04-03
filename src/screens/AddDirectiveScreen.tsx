@@ -1,8 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import { addDays, format } from 'date-fns';
 import React, { useState } from 'react';
 import {
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -162,6 +165,14 @@ export default function AddDirectiveScreen({ navigation }: Props) {
   const [showCustomDuration, setShowCustomDuration] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Start / end date state
+  // null startDate = "now"; null endDate = derive from durationDays (or forever)
+  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(null);
+  // iOS / web: track which field the picker is editing + live value while dragging
+  const [pickerTarget, setPickerTarget] = useState<'start' | 'end' | null>(null);
+  const [pickerValue, setPickerValue] = useState<Date>(new Date());
+
   const isDo = type === 'DO';
   const accentColor = isDo ? colors.do : colors.dont;
   const accentLight = isDo ? colors.doLight : colors.dontLight;
@@ -203,6 +214,53 @@ export default function AddDirectiveScreen({ navigation }: Props) {
     }
   }
 
+  function commitDate(target: 'start' | 'end', date: Date) {
+    if (target === 'start') {
+      setStartDate(date);
+      // If the current endDate would be at or before the new startDate, clear it
+      if (endDate && date >= endDate) setEndDate(null);
+    } else {
+      setEndDate(date);
+      // Picking a specific end date clears any duration-days selection
+      setDurationDays(null);
+      setShowCustomDuration(false);
+    }
+    setPickerTarget(null);
+  }
+
+  function openDatePicker(target: 'start' | 'end') {
+    const minDate = target === 'end' ? (startDate ?? new Date()) : new Date();
+    const initial =
+      target === 'start'
+        ? (startDate ?? new Date())
+        : (endDate ?? addDays(startDate ?? new Date(), 7));
+
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: initial,
+        mode: 'date',
+        minimumDate: minDate,
+        onChange: (_ev, datePart) => {
+          if (!datePart) return;
+          DateTimePickerAndroid.open({
+            value: datePart,
+            mode: 'time',
+            onChange: (_ev2, timePart) => {
+              if (!timePart) return;
+              const combined = new Date(datePart);
+              combined.setHours(timePart.getHours(), timePart.getMinutes(), 0, 0);
+              commitDate(target, combined);
+            },
+          });
+        },
+      });
+    } else {
+      // iOS + web: show the modal/inline picker
+      setPickerValue(initial);
+      setPickerTarget(target);
+    }
+  }
+
   async function handleStart() {
     setSaving(true);
     try {
@@ -212,6 +270,8 @@ export default function AddDirectiveScreen({ navigation }: Props) {
         durationDays,
         checkInIntervalMinutes: intervalMinutes,
         carryForward: true,
+        startAt: startDate?.toISOString(),
+        endAt: endDate?.toISOString(),
       });
       navigation.goBack();
     } finally {
@@ -352,13 +412,100 @@ export default function AddDirectiveScreen({ navigation }: Props) {
             </>
           )}
 
-          {/* ── Step 2: Duration ── */}
+          {/* ── Step 2: Start & Duration ── */}
           {step === 2 && (
             <>
-              <Text style={styles.question}>For how long?</Text>
+              <Text style={styles.question}>When and{'\n'}for how long?</Text>
+
+              {/* ── START section ── */}
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionLabel}>Starts</Text>
+              </View>
+              <View style={styles.startModeRow}>
+                <Pressable
+                  style={[
+                    styles.startModeBtn,
+                    !startDate && pickerTarget !== 'start' && { borderColor: accentColor, backgroundColor: accentLight },
+                  ]}
+                  onPress={() => { setStartDate(null); setPickerTarget(null); }}
+                >
+                  <Ionicons name="flash-outline" size={15} color={!startDate && pickerTarget !== 'start' ? accentColor : colors.textMuted} />
+                  <Text style={[styles.startModeBtnLabel, !startDate && pickerTarget !== 'start' && { color: accentColor }]}>
+                    Right now
+                  </Text>
+                  {!startDate && pickerTarget !== 'start' && (
+                    <View style={[styles.startModeBtnCheck, { backgroundColor: accentColor }]}>
+                      <Ionicons name="checkmark" size={11} color={colors.background} />
+                    </View>
+                  )}
+                </Pressable>
+
+                <Pressable
+                  style={[
+                    styles.startModeBtn,
+                    (!!startDate || pickerTarget === 'start') && { borderColor: accentColor, backgroundColor: accentLight },
+                  ]}
+                  onPress={() => openDatePicker('start')}
+                >
+                  <Ionicons name="calendar-outline" size={15} color={!!startDate || pickerTarget === 'start' ? accentColor : colors.textMuted} />
+                  <Text
+                    style={[styles.startModeBtnLabel, (!!startDate || pickerTarget === 'start') && { color: accentColor }]}
+                    numberOfLines={1}
+                  >
+                    {startDate ? format(startDate, 'MMM d, h:mm a') : 'Future date'}
+                  </Text>
+                  {(!!startDate || pickerTarget === 'start') && (
+                    <View style={[styles.startModeBtnCheck, { backgroundColor: accentColor }]}>
+                      <Ionicons name="checkmark" size={11} color={colors.background} />
+                    </View>
+                  )}
+                </Pressable>
+              </View>
+
+              {/* Web inline start picker — single Set button inline with the input */}
+              {Platform.OS === 'web' && pickerTarget === 'start' && (
+                <View style={styles.webPickerBlock}>
+                  <View style={styles.webPickerRow}>
+                  {(React.createElement as any)('input', {
+                    key: 'web-start-picker',
+                    type: 'datetime-local',
+                    autoFocus: true,
+                    min: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                    value: format(pickerValue, "yyyy-MM-dd'T'HH:mm"),
+                    style: {
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      border: `2px solid ${accentColor}`,
+                      backgroundColor: colors.card,
+                      color: colors.text,
+                      fontSize: 16,
+                      flex: 1,
+                      boxSizing: 'border-box',
+                      outline: 'none',
+                      colorScheme: 'dark',
+                    },
+                    onChange: (e: any) => {
+                      const d = new Date(e.target.value);
+                      if (!isNaN(d.getTime())) setPickerValue(d);
+                    },
+                  })}
+                    <Pressable
+                      style={[styles.webSetBtn, { backgroundColor: accentColor }]}
+                      onPress={() => commitDate('start', pickerValue)}
+                    >
+                      <Text style={styles.webSetText}>Set</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {/* ── END section ── */}
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionLabel}>Ends</Text>
+              </View>
               <View style={styles.optionList}>
                 {DURATION_PRESETS.map((d) => {
-                  const selected = !showCustomDuration && durationDays === d.value;
+                  const selected = endDate === null && !showCustomDuration && durationDays === d.value;
                   return (
                     <Pressable
                       key={String(d.value)}
@@ -366,7 +513,12 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                         styles.optionItem,
                         selected && { borderColor: accentColor, backgroundColor: accentLight },
                       ]}
-                      onPress={() => { setDurationDays(d.value); setShowCustomDuration(false); }}
+                      onPress={() => {
+                        setDurationDays(d.value);
+                        setShowCustomDuration(false);
+                        setEndDate(null);
+                        setPickerTarget(null);
+                      }}
                     >
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.optionText, selected && { color: accentColor }]}>
@@ -383,16 +535,16 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                   );
                 })}
 
-                {/* Custom duration */}
+                {/* Custom duration (days) */}
                 <Pressable
                   style={[
                     styles.optionItem,
-                    showCustomDuration && { borderColor: accentColor, backgroundColor: accentLight },
+                    endDate === null && showCustomDuration && { borderColor: accentColor, backgroundColor: accentLight },
                   ]}
-                  onPress={() => setShowCustomDuration(true)}
+                  onPress={() => { setShowCustomDuration(true); setEndDate(null); setPickerTarget(null); }}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.optionText, showCustomDuration && { color: accentColor }]}>
+                    <Text style={[styles.optionText, endDate === null && showCustomDuration && { color: accentColor }]}>
                       Custom
                     </Text>
                     <Text style={styles.optionSub}>Enter any number of days</Text>
@@ -400,7 +552,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                   <Ionicons name="pencil-outline" size={16} color={colors.textMuted} />
                 </Pressable>
 
-                {showCustomDuration && (
+                {showCustomDuration && endDate === null && (
                   <View style={styles.customInputRow}>
                     <TextInput
                       style={[styles.customInput, { borderColor: accentColor }]}
@@ -420,6 +572,68 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                     >
                       <Ionicons name="checkmark" size={18} color={colors.background} />
                     </Pressable>
+                  </View>
+                )}
+
+                {/* Specific end date & time */}
+                <Pressable
+                  style={[
+                    styles.optionItem,
+                    endDate !== null && { borderColor: accentColor, backgroundColor: accentLight },
+                  ]}
+                  onPress={() => openDatePicker('end')}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.optionText, endDate !== null && { color: accentColor }]}>
+                      {endDate ? format(endDate, 'MMM d, yyyy · h:mm a') : 'Specific date & time'}
+                    </Text>
+                    <Text style={styles.optionSub}>
+                      {endDate ? 'Tap to change' : 'Pick an exact end date'}
+                    </Text>
+                  </View>
+                  {endDate !== null ? (
+                    <View style={[styles.optionCheck, { backgroundColor: accentColor }]}>
+                      <Ionicons name="checkmark" size={13} color={colors.background} />
+                    </View>
+                  ) : (
+                    <Ionicons name="calendar-outline" size={16} color={colors.textMuted} />
+                  )}
+                </Pressable>
+
+                {/* Web inline end picker — single Set button inline with the input */}
+                {Platform.OS === 'web' && pickerTarget === 'end' && (
+                  <View style={styles.webPickerBlock}>
+                    <View style={styles.webPickerRow}>
+                      {(React.createElement as any)('input', {
+                        key: 'web-end-picker',
+                        type: 'datetime-local',
+                        autoFocus: true,
+                        min: format(startDate ?? new Date(), "yyyy-MM-dd'T'HH:mm"),
+                        value: format(pickerValue, "yyyy-MM-dd'T'HH:mm"),
+                        style: {
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          border: `2px solid ${accentColor}`,
+                          backgroundColor: colors.card,
+                          color: colors.text,
+                          fontSize: 16,
+                          flex: 1,
+                          boxSizing: 'border-box',
+                          outline: 'none',
+                          colorScheme: 'dark',
+                        },
+                        onChange: (e: any) => {
+                          const d = new Date(e.target.value);
+                          if (!isNaN(d.getTime())) setPickerValue(d);
+                        },
+                      })}
+                      <Pressable
+                        style={[styles.webSetBtn, { backgroundColor: accentColor }]}
+                        onPress={() => commitDate('end', pickerValue)}
+                      >
+                        <Text style={styles.webSetText}>Set</Text>
+                      </Pressable>
+                    </View>
                   </View>
                 )}
               </View>
@@ -523,9 +737,19 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                   <Text style={styles.summaryAction}>{action}</Text>
                   <View style={styles.summaryMeta}>
                     <View style={styles.summaryRow}>
-                      <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
+                      <Ionicons name="play-circle-outline" size={14} color={colors.textSecondary} />
                       <Text style={styles.summaryMetaText}>
-                        {durationDays ? `${durationDays} days` : 'forever'}
+                        {startDate ? `Starts ${format(startDate, 'MMM d, h:mm a')}` : 'Starts now'}
+                      </Text>
+                    </View>
+                    <View style={styles.summaryRow}>
+                      <Ionicons name="flag-outline" size={14} color={colors.textSecondary} />
+                      <Text style={styles.summaryMetaText}>
+                        {endDate
+                          ? `Ends ${format(endDate, 'MMM d, yyyy · h:mm a')}`
+                          : durationDays
+                          ? `${durationDays} days`
+                          : 'No end date'}
                       </Text>
                     </View>
                     <View style={styles.summaryRow}>
@@ -544,7 +768,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                     </Pressable>
                     <Pressable onPress={() => setStep(2)} style={styles.editLink}>
                       <Ionicons name="pencil-outline" size={12} color={colors.textMuted} />
-                      <Text style={styles.editLinkText}>Edit duration</Text>
+                      <Text style={styles.editLinkText}>Edit dates</Text>
                     </Pressable>
                     <Pressable onPress={() => setStep(3)} style={styles.editLink}>
                       <Ionicons name="pencil-outline" size={12} color={colors.textMuted} />
@@ -590,6 +814,36 @@ export default function AddDirectiveScreen({ navigation }: Props) {
             </Pressable>
           )}
         </View>
+        {/* iOS date/time picker — bottom sheet */}
+        {Platform.OS === 'ios' && pickerTarget !== null && (
+          <Modal transparent animationType="slide" visible onRequestClose={() => setPickerTarget(null)}>
+            <Pressable style={pickerStyles.overlay} onPress={() => setPickerTarget(null)}>
+              <Pressable style={pickerStyles.sheet} onPress={() => {}}>
+                <View style={pickerStyles.handle} />
+                <View style={pickerStyles.header}>
+                  <Text style={pickerStyles.title}>
+                    {pickerTarget === 'start' ? 'Set start' : 'Set end'}
+                  </Text>
+                  <Pressable
+                    onPress={() => commitDate(pickerTarget, pickerValue)}
+                    hitSlop={8}
+                  >
+                    <Text style={[pickerStyles.done, { color: accentColor }]}>Set</Text>
+                  </Pressable>
+                </View>
+                <DateTimePicker
+                  value={pickerValue}
+                  mode="datetime"
+                  display="spinner"
+                  textColor={colors.text}
+                  minimumDate={pickerTarget === 'end' ? (startDate ?? new Date()) : new Date()}
+                  onChange={(_, date) => { if (date) setPickerValue(date); }}
+                  style={{ width: '100%' }}
+                />
+              </Pressable>
+            </Pressable>
+          </Modal>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -848,5 +1102,103 @@ const styles = StyleSheet.create({
     color: colors.background,
     fontWeight: fontWeights.bold,
     fontSize: fontSizes.md,
+  },
+
+  // Web date picker block
+  webPickerBlock: {
+    gap: spacing.xs,
+  },
+  webPickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  webSetBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.full,
+    alignItems: 'center',
+  },
+  webSetText: {
+    fontSize: fontSizes.sm,
+    color: colors.background,
+    fontWeight: fontWeights.bold,
+  },
+
+  // Start-mode toggle (two buttons side by side)
+  startModeRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  startModeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.sm + 2,
+    backgroundColor: colors.card,
+    position: 'relative',
+  },
+  startModeBtnLabel: {
+    flex: 1,
+    fontSize: fontSizes.sm,
+    color: colors.textSecondary,
+    fontWeight: fontWeights.medium,
+  },
+  startModeBtnCheck: {
+    width: 18,
+    height: 18,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
+
+// ─── iOS picker sheet styles ──────────────────────────────────────────────────
+
+const pickerStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingBottom: spacing.xl,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+  },
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: 'center',
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  title: {
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.bold,
+    color: colors.text,
+    flex: 1,
+  },
+  done: {
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.bold,
   },
 });

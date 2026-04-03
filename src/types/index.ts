@@ -5,12 +5,14 @@ export interface Directive {
   id: string;
   type: DirectiveType;
   action: string;
-  durationDays: number | null; // null = forever
+  durationDays: number | null; // null = forever (used when no explicit endAt)
   checkInIntervalMinutes: number;
   carryForward: boolean;
   createdAt: string; // ISO datetime
   active: boolean;
-  pausedAt?: string; // ISO datetime if paused
+  pausedAt?: string;  // ISO datetime if paused
+  startAt?: string;   // ISO datetime — if set and future, defers first check-in
+  endAt?: string;     // ISO datetime — explicit end; overrides durationDays
 }
 
 export interface CheckIn {

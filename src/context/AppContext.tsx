@@ -40,6 +40,8 @@ interface NewDirectivePayload {
   durationDays: number | null;
   checkInIntervalMinutes: number;
   carryForward: boolean;
+  startAt?: string; // ISO — if set and future, defers first check-in
+  endAt?: string;   // ISO — explicit end date
 }
 
 interface AppContextType {
@@ -49,6 +51,7 @@ interface AppContextType {
   isLoading: boolean;
   addDirective: (payload: NewDirectivePayload) => Promise<void>;
   respondToCheckIn: (checkInId: string, response: 'success' | 'failure') => Promise<void>;
+  failCurrentWindow: (directiveId: string) => Promise<void>;
   pauseDirective: (id: string) => Promise<void>;
   resumeDirective: (id: string) => Promise<void>;
   deleteDirective: (id: string) => Promise<void>;
@@ -110,12 +113,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       };
       await storageAddDirective(directive);
 
+      // If startAt is in the future, first check-in is due startAt + interval.
+      // Otherwise (starts now), first check-in is due now + interval.
+      const effectiveStartMs = payload.startAt && new Date(payload.startAt).getTime() > Date.now()
+        ? new Date(payload.startAt).getTime()
+        : Date.now();
+
       // Schedule first check-in
       const checkIn: CheckIn = {
         id: generateId(),
         directiveId: directive.id,
         dueAt: new Date(
-          Date.now() + payload.checkInIntervalMinutes * 60 * 1000
+          effectiveStartMs + payload.checkInIntervalMinutes * 60 * 1000
         ).toISOString(),
         response: 'pending',
       };
@@ -187,6 +196,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await load();
     },
     [directives, load]
+  );
+
+  const failCurrentWindow = useCallback(
+    async (directiveId: string) => {
+      const now = new Date().toISOString();
+      const pending = checkIns.find(
+        (c) => c.directiveId === directiveId && c.response === 'pending'
+      );
+      if (!pending) return;
+
+      await updateCheckIn(pending.id, { response: 'failure', respondedAt: now });
+
+      const directive = directives.find((d) => d.id === directiveId);
+      if (!directive || !directive.active) {
+        await load();
+        return;
+      }
+
+      const nextCheckIn: CheckIn = {
+        id: generateId(),
+        directiveId: directive.id,
+        dueAt: new Date(
+          Date.now() + directive.checkInIntervalMinutes * 60 * 1000
+        ).toISOString(),
+        response: 'pending',
+      };
+      await addCheckIn(nextCheckIn);
+      const notifId = await scheduleNextCheckIn(directive, nextCheckIn.id);
+      if (notifId) notifIds.current[directive.id] = notifId;
+
+      await load();
+    },
+    [checkIns, directives, load]
   );
 
   const pauseDirective = useCallback(
@@ -284,6 +326,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         addDirective,
         respondToCheckIn,
+        failCurrentWindow,
         pauseDirective,
         resumeDirective,
         deleteDirective,

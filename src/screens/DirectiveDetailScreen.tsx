@@ -146,10 +146,11 @@ const stripStyles = StyleSheet.create({
 
 export default function DirectiveDetailScreen({ route, navigation }: Props) {
   const { directiveId } = route.params;
-  const { directives, checkIns, getStreak, pauseDirective, resumeDirective, deleteDirective } =
+  const { directives, checkIns, getStreak, pauseDirective, resumeDirective, deleteDirective, failCurrentWindow } =
     useApp();
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showFailConfirm, setShowFailConfirm] = useState(false);
   const [tick, setTick] = useState(0);
 
   const directive = directives.find((d) => d.id === directiveId);
@@ -192,6 +193,9 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
 
   if (!directive) return null;
 
+  const startAtMs = directive.startAt ? new Date(directive.startAt).getTime() : null;
+  const hasStarted = startAtMs === null || startAtMs <= Date.now();
+
   const isDo = directive.type === 'DO';
   const isPaused = !directive.active && !!directive.pausedAt;
   const accentColor = isDo ? colors.do : colors.dont;
@@ -199,12 +203,14 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
 
   const historyCheckIns = [...respondedCheckIns].reverse();
 
-  const isDue = pendingCheckIn ? remainingMs === 0 : false;
+  const isDue = pendingCheckIn ? hasStarted && remainingMs === 0 : false;
 
   // Timer display values
   const timerMs = isDo ? remainingMs : elapsedMs;
   const timerLabel = isPaused
     ? 'paused'
+    : !hasStarted
+    ? 'scheduled start'
     : isDue
     ? isDo
       ? "time's up — check in"
@@ -277,7 +283,7 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
           </View>
 
           {/* Live clock */}
-          {!isPaused && pendingCheckIn && (
+          {!isPaused && pendingCheckIn && hasStarted && (
             <View style={styles.clockBlock}>
               <Text style={styles.clockLabel}>{timerLabel}</Text>
               <Text style={[styles.clockValue, { color: isDue ? colors.warning : accentColor }]}>
@@ -292,6 +298,15 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
                   ]}
                 />
               </View>
+            </View>
+          )}
+
+          {!isPaused && !hasStarted && directive.startAt && (
+            <View style={styles.scheduledBadge}>
+              <Ionicons name="time-outline" size={16} color={accentColor} />
+              <Text style={styles.scheduledText}>
+                Starts {format(parseISO(directive.startAt), 'MMM d, yyyy · h:mm a')}
+              </Text>
             </View>
           )}
 
@@ -310,7 +325,7 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
             <WindowStrip
               pastCheckIns={respondedCheckIns}
               windowProgress={windowProgress}
-              hasPending={!!pendingCheckIn && !isPaused}
+              hasPending={!!pendingCheckIn && !isPaused && hasStarted}
               accentColor={accentColor}
             />
           </View>
@@ -326,11 +341,24 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
             </View>
           )}
 
-          {/* Duration chip */}
+          {/* Start / end chips */}
           <View style={styles.chips}>
+            {directive.startAt && (
+              <Chip
+                icon="play-circle-outline"
+                label={`Starts ${format(parseISO(directive.startAt), 'MMM d, h:mm a')}`}
+                color={accentColor}
+              />
+            )}
             <Chip
-              icon="calendar-outline"
-              label={directive.durationDays ? `${directive.durationDays}-day commitment` : 'open-ended'}
+              icon="flag-outline"
+              label={
+                directive.endAt
+                  ? `Ends ${format(parseISO(directive.endAt), 'MMM d, yyyy')}`
+                  : directive.durationDays
+                  ? `${directive.durationDays}-day commitment`
+                  : 'open-ended'
+              }
             />
           </View>
 
@@ -344,10 +372,18 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
               <Text style={styles.actionBtnText}>Resume</Text>
             </Pressable>
           ) : (
-            <Pressable style={styles.pauseBtn} onPress={() => pauseDirective(directiveId)}>
-              <Ionicons name="pause" size={16} color={colors.textSecondary} />
-              <Text style={styles.pauseBtnText}>Pause this directive</Text>
-            </Pressable>
+            <>
+              <Pressable style={styles.pauseBtn} onPress={() => pauseDirective(directiveId)}>
+                <Ionicons name="pause" size={16} color={colors.textSecondary} />
+                <Text style={styles.pauseBtnText}>Pause this directive</Text>
+              </Pressable>
+              {pendingCheckIn && hasStarted && (
+                <Pressable style={styles.failWindowBtn} onPress={() => setShowFailConfirm(true)}>
+                  <Ionicons name="close-circle-outline" size={16} color={colors.failure} />
+                  <Text style={styles.failWindowBtnText}>Fail this window</Text>
+                </Pressable>
+              )}
+            </>
           )}
         </View>
       </View>
@@ -394,6 +430,43 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
           );
         }}
       />
+
+      {/* Fail window confirmation */}
+      <Modal
+        visible={showFailConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowFailConfirm(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowFailConfirm(false)}>
+          <Pressable style={styles.modalBox} onPress={() => {}}>
+            <View style={[styles.modalIconWrap, { backgroundColor: 'rgba(255,68,102,0.12)' }]}>
+              <Ionicons name="close-circle-outline" size={28} color={colors.failure} />
+            </View>
+            <Text style={styles.modalTitle}>Fail this window?</Text>
+            <Text style={styles.modalBody}>
+              This marks the current window as a failure and immediately starts a fresh one.
+            </Text>
+            <View style={styles.modalBtns}>
+              <Pressable
+                style={styles.modalCancelBtn}
+                onPress={() => setShowFailConfirm(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={styles.modalDeleteBtn}
+                onPress={async () => {
+                  setShowFailConfirm(false);
+                  await failCurrentWindow(directiveId);
+                }}
+              >
+                <Text style={styles.modalDeleteText}>Fail it</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Delete confirmation */}
       <Modal
@@ -615,6 +688,23 @@ const styles = StyleSheet.create({
     color: colors.warning,
     fontWeight: fontWeights.medium,
   },
+  scheduledBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs + 2,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  scheduledText: {
+    fontSize: fontSizes.sm,
+    color: colors.textSecondary,
+    fontWeight: fontWeights.medium,
+  },
 
   // Window strip section
   stripSection: { gap: 6 },
@@ -655,6 +745,22 @@ const styles = StyleSheet.create({
   },
   pauseBtnText: {
     color: colors.textSecondary,
+    fontWeight: fontWeights.medium,
+    fontSize: fontSizes.md,
+  },
+  failWindowBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderRadius: radius.full,
+    paddingVertical: spacing.sm + 4,
+    backgroundColor: 'rgba(255,68,102,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,68,102,0.3)',
+  },
+  failWindowBtnText: {
+    color: colors.failure,
     fontWeight: fontWeights.medium,
     fontSize: fontSizes.md,
   },
