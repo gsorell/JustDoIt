@@ -1,5 +1,5 @@
 [build]
-  command = "npx expo export --platform web && cp web/sw.js dist/sw.js && cp assets/icon-192.png assets/icon-192-maskable.png assets/icon-512.png assets/icon-512-maskable.png assets/apple-touch-icon.png assets/favicon-32.png dist/assets/"
+  command = "npx expo export --platform web && cp web/sw.js dist/sw.js && mkdir -p dist/assets && cp assets/icon-192.png assets/icon-192-maskable.png assets/icon-512.png assets/icon-512-maskable.png assets/apple-touch-icon.png assets/favicon-32.png dist/assets/"
   publish = "dist"
 
 [[redirects]]
