@@ -32,9 +32,7 @@ await make(32,   BG, 0.82, 'assets/favicon-32.png');
 await make(1024, TRANSPARENT, 0.72, 'assets/adaptive-icon.png');
 
 // ── PWA icons ───────────────────────────────────────────────────────────────
-// Both "any" and "maskable" use the dark bg so Android masks to a filled circle,
-// not a dark square inside a white circle.
-await make(512, BG, 0.72, 'assets/icon-512.png');
-await make(192, BG, 0.72, 'assets/icon-192.png');
-await make(512, BG, 0.72, 'assets/icon-512-maskable.png');
-await make(192, BG, 0.72, 'assets/icon-192-maskable.png');
+// Live in public/ so Expo's web export copies them to dist/ root.
+// Dark bg fills the full canvas; Chrome masks to a filled circle.
+await make(512, BG, 0.72, 'public/icon-512.png');
+await make(192, BG, 0.72, 'public/icon-192.png');
