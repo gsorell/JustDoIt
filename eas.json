@@ -19,8 +19,10 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "gsorell@gmail.com",
-        "appleTeamId": "5Z2HT9TQNK"
+        "ascAppId": "6781749506",
+        "ascApiKeyPath": "./credentials/asc-api-key.p8",
+        "ascApiKeyId": "US949CQ2FH",
+        "ascApiKeyIssuerId": "34b53089-c437-4359-9cc8-1f3e872db488"
       }
     }
   }

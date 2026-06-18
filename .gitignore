@@ -39,3 +39,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# App Store Connect API key (secret)
+credentials/
+*.p8
