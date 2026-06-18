@@ -48,16 +48,17 @@ export default function HomeScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
 
-      {/* Settings + About — always reachable */}
+      {/* Settings + About — always reachable. Offset by the top inset so they
+          clear the system status bar (absolute children aren't inset by SafeAreaView). */}
       <Pressable
-        style={styles.settingsBtn}
+        style={[styles.settingsBtn, { top: insets.top + spacing.sm }]}
         onPress={() => navigation.navigate('Settings')}
         hitSlop={8}
       >
         <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
       </Pressable>
       <Pressable
-        style={styles.aboutBtn}
+        style={[styles.aboutBtn, { top: insets.top + spacing.sm }]}
         onPress={() => navigation.navigate('About')}
         hitSlop={8}
       >
@@ -190,7 +191,6 @@ const styles = StyleSheet.create({
 
   aboutBtn: {
     position: 'absolute',
-    top: spacing.sm,
     right: spacing.md,
     zIndex: 10,
     width: 38,
@@ -201,7 +201,6 @@ const styles = StyleSheet.create({
   },
   settingsBtn: {
     position: 'absolute',
-    top: spacing.sm,
     left: spacing.md,
     zIndex: 10,
     width: 38,
@@ -239,7 +238,7 @@ const styles = StyleSheet.create({
     // The wordmark sits in a padded square canvas; pull the slogan up to close
     // the visual gap created by that built-in whitespace so it matches the
     // slogan→date spacing below.
-    marginBottom: -36,
+    marginBottom: -44,
   },
   slogan: {
     fontSize: fontSizes.md,
