@@ -2,6 +2,7 @@
   "expo": {
     "name": "Cadence",
     "slug": "cadence",
+    "owner": "gsorell",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,7 +14,12 @@
       "backgroundColor": "#0F0F18"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.gsorell.cadence",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -34,6 +40,11 @@
       "display": "standalone",
       "orientation": "portrait",
       "icon": "./assets/icon-512.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "8f036956-4f98-4aef-b27d-926efbc45f78"
+      }
     }
   }
 }
