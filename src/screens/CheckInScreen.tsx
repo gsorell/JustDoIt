@@ -1,12 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Animated,
   Modal,
-  Platform,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   View,
@@ -14,6 +11,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useApp } from '../context/AppContext';
 import { intervalLabel } from '../services/storage';
+import { charmUnlockedAt, repCount } from '../services/charms';
+import SuccessOverlay from '../components/SuccessOverlay';
+import { Charm } from '../services/charms';
 import { RootStackParamList } from '../types';
 import {
   colors,
@@ -24,255 +24,6 @@ import {
 } from '../utils/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CheckIn'>;
-
-// ─── Milestone copy ────────────────────────────────────────────────────────────
-
-function streakHeadline(streak: number, isDo: boolean): string {
-  if (streak === 1) return 'First one.\nThe hardest.';
-  if (streak === 2) return 'Two in a row.\nKeep going.';
-  if (streak === 3) return 'Three straight.\nMomentum building.';
-  if (streak === 5) return 'Five in a row.\nYou\'re doing it.';
-  if (streak === 10) return 'Ten straight.\nThis is becoming real.';
-  if (streak === 15) return 'Fifteen.\nYou\'re not stopping.';
-  if (streak === 20) return 'Twenty in a row.\nThis is a habit now.';
-  if (streak === 25) return 'Twenty-five.\nYou\'re consistent.';
-  if (streak === 30) return 'Thirty straight.\nOne month strong.';
-  if (streak === 50) return 'Fifty.\nUnstoppable.';
-  if (streak === 100) return 'One hundred.\nThis is who you are.';
-  if (streak > 100) return 'Legendary.';
-  if (streak > 50) return `${streak} and counting.\nNothing can stop you.`;
-  if (streak > 30) return `${streak} straight.\nBuilt different.`;
-  if (streak > 20) return `${streak} in a row.\nYou own this.`;
-  if (streak > 10) return `${streak} straight.\nThis is becoming real.`;
-  if (isDo) return `${streak} in a row.\nKeep showing up.`;
-  return `${streak} windows clean.\nYou\'re resisting.`;
-}
-
-function formatCleanTime(totalMinutes: number): string {
-  if (totalMinutes < 60) return `${Math.round(totalMinutes)} minutes`;
-  const hours = Math.floor(totalMinutes / 60);
-  const mins = Math.round(totalMinutes % 60);
-  if (hours < 24) return mins > 0 ? `${hours}h ${mins}m` : `${hours} hours`;
-  const days = Math.floor(hours / 24);
-  const remHours = hours % 24;
-  if (days < 7) return remHours > 0 ? `${days}d ${remHours}h` : `${days} days`;
-  const weeks = Math.floor(days / 7);
-  const remDays = days % 7;
-  return remDays > 0 ? `${weeks}w ${remDays}d` : `${weeks} weeks`;
-}
-
-// ─── Success overlay ───────────────────────────────────────────────────────────
-
-interface SuccessOverlayProps {
-  streak: number;
-  isDo: boolean;
-  accentColor: string;
-  action: string;
-  cleanTimeMinutes: number | null;
-  onDismiss: () => void;
-}
-
-function SuccessOverlay({ streak, isDo, accentColor, action, cleanTimeMinutes, onDismiss }: SuccessOverlayProps) {
-  const scale = useRef(new Animated.Value(0.4)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-  const bgOpacity = useRef(new Animated.Value(0)).current;
-
-  const nativeDriver = Platform.OS !== 'web';
-
-  useEffect(() => {
-    Animated.sequence([
-      Animated.timing(bgOpacity, { toValue: 1, duration: 250, useNativeDriver: nativeDriver }),
-      Animated.parallel([
-        Animated.spring(scale, { toValue: 1, friction: 5, tension: 120, useNativeDriver: nativeDriver }),
-        Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: nativeDriver }),
-      ]),
-    ]).start();
-  }, []);
-
-  function handleShare() {
-    const link = 'https://chunkitdoit.netlify.app/';
-    let message: string;
-    if (isDo) {
-      message = streak === 1
-        ? `Just checked in on "${action}" for the first time. Starting the streak. 🔥\n\n#Cadence — track your commitments: ${link}`
-        : `${streak} check-ins in a row on "${action}". Building the habit. 🔥\n\n#Cadence — track your commitments: ${link}`;
-    } else {
-      const cleanStr = cleanTimeMinutes ? ` — ${formatCleanTime(cleanTimeMinutes)} total clean time` : '';
-      message = streak === 1
-        ? `Just completed my first clean window avoiding "${action}". The streak begins.${cleanStr} 💪\n\n#Cadence — track your commitments: ${link}`
-        : `${streak} clean windows in a row avoiding "${action}"${cleanStr}. 💪\n\n#Cadence — track your commitments: ${link}`;
-    }
-    Share.share({ message });
-  }
-
-  const isMilestone = [1, 2, 3, 5, 10, 15, 20, 25, 30, 50, 100].includes(streak);
-  const headline = streakHeadline(streak, isDo);
-
-  return (
-    <View style={StyleSheet.absoluteFill}>
-      {/* Flood background */}
-      <Animated.View
-        style={[StyleSheet.absoluteFill, { backgroundColor: accentColor, opacity: bgOpacity, pointerEvents: 'none' }]}
-      />
-
-      <SafeAreaView style={successStyles.inner} edges={['top', 'bottom']}>
-        {/* Streak number */}
-        <Animated.View style={[successStyles.numberWrap, { opacity, transform: [{ scale }] }]}>
-          <Text style={successStyles.streakNumber}>{streak}</Text>
-          <Text style={successStyles.streakUnit}>
-            {streak === 1 ? 'check-in' : 'in a row'}
-          </Text>
-        </Animated.View>
-
-        {/* Headline */}
-        <Animated.Text style={[successStyles.headline, { opacity }]}>
-          {headline}
-        </Animated.Text>
-
-        {/* Clean time for DONT */}
-        {!isDo && cleanTimeMinutes !== null && cleanTimeMinutes > 0 && (
-          <Animated.View style={[successStyles.cleanTimeBlock, { opacity }]}>
-            <Text style={successStyles.cleanTimeLabel}>total clean time</Text>
-            <Text style={successStyles.cleanTimeValue}>
-              {formatCleanTime(cleanTimeMinutes)}
-            </Text>
-          </Animated.View>
-        )}
-
-        {/* Milestone badge */}
-        {isMilestone && (
-          <Animated.View style={[successStyles.milestoneBadge, { opacity }]}>
-            <Ionicons name="trophy" size={14} color={colors.background} />
-            <Text style={successStyles.milestoneBadgeText}>Milestone reached</Text>
-          </Animated.View>
-        )}
-
-        {/* Action buttons */}
-        <Animated.View style={[successStyles.actions, { opacity }]}>
-          <Pressable style={successStyles.shareBtn} onPress={handleShare}>
-            <Ionicons name="share-outline" size={18} color={accentColor} />
-            <Text style={[successStyles.shareBtnText, { color: accentColor }]}>
-              Share this
-            </Text>
-          </Pressable>
-          <Pressable style={successStyles.continueBtn} onPress={onDismiss}>
-            <Text style={successStyles.continueBtnText}>Continue</Text>
-            <Ionicons name="arrow-forward" size={18} color={colors.background} />
-          </Pressable>
-        </Animated.View>
-      </SafeAreaView>
-    </View>
-  );
-}
-
-const successStyles = StyleSheet.create({
-  inner: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.md,
-    padding: spacing.xl,
-  },
-  numberWrap: {
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-  },
-  streakNumber: {
-    fontSize: 96,
-    fontWeight: fontWeights.black,
-    color: colors.background,
-    letterSpacing: -4,
-    lineHeight: 96,
-  },
-  streakUnit: {
-    fontSize: fontSizes.md,
-    fontWeight: fontWeights.bold,
-    color: colors.background,
-    opacity: 0.7,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  headline: {
-    fontSize: fontSizes.xl,
-    fontWeight: fontWeights.black,
-    color: colors.background,
-    textAlign: 'center',
-    lineHeight: 32,
-    letterSpacing: -0.3,
-  },
-  cleanTimeBlock: {
-    alignItems: 'center',
-    marginTop: spacing.xs,
-    backgroundColor: 'rgba(0,0,0,0.15)',
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    gap: 2,
-  },
-  cleanTimeLabel: {
-    fontSize: fontSizes.xs,
-    color: colors.background,
-    opacity: 0.7,
-    fontWeight: fontWeights.medium,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  cleanTimeValue: {
-    fontSize: fontSizes.xl,
-    fontWeight: fontWeights.black,
-    color: colors.background,
-    letterSpacing: -0.5,
-  },
-  milestoneBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    borderRadius: radius.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    marginTop: spacing.xs,
-  },
-  milestoneBadgeText: {
-    fontSize: fontSizes.xs,
-    fontWeight: fontWeights.bold,
-    color: colors.background,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  actions: {
-    width: '100%',
-    gap: spacing.sm,
-    marginTop: spacing.lg,
-  },
-  shareBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.background,
-    borderRadius: radius.full,
-    paddingVertical: spacing.sm + 4,
-  },
-  shareBtnText: {
-    fontSize: fontSizes.md,
-    fontWeight: fontWeights.bold,
-  },
-  continueBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    borderRadius: radius.full,
-    paddingVertical: spacing.sm + 4,
-  },
-  continueBtnText: {
-    fontSize: fontSizes.md,
-    fontWeight: fontWeights.bold,
-    color: colors.background,
-  },
-});
 
 // ─── Main screen ───────────────────────────────────────────────────────────────
 
@@ -285,6 +36,7 @@ export default function CheckInScreen({ route, navigation }: Props) {
   const [showFailOptions, setShowFailOptions] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [newStreak, setNewStreak] = useState(0);
+  const [unlockedCharm, setUnlockedCharm] = useState<Charm | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -312,6 +64,10 @@ export default function CheckInScreen({ route, navigation }: Props) {
   async function handleYes() {
     setSaving(true);
     try {
+      // Cumulative reps after this success — drives the charm check.
+      const newReps = repCount(directiveId, checkIns) + 1;
+      setUnlockedCharm(charmUnlockedAt(newReps) ?? null);
+
       await respondToCheckIn(checkInId, 'success');
       // Compute streak after response is saved
       const updatedStreak = getStreak(directiveId) + 1;
@@ -404,6 +160,7 @@ export default function CheckInScreen({ route, navigation }: Props) {
             isDo={isDo}
             accentColor={accentColor}
             action={directive.action}
+            unlockedCharm={unlockedCharm}
             cleanTimeMinutes={
               cleanTimeMinutes !== null
                 ? cleanTimeMinutes + directive.checkInIntervalMinutes

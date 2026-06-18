@@ -11,7 +11,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import DirectiveCard from '../components/DirectiveCard';
 import { useApp } from '../context/AppContext';
 import { RootStackParamList } from '../types';
@@ -19,53 +19,115 @@ import { colors, fontSizes, fontWeights, radius, spacing } from '../utils/theme'
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
+type Filter = 'due' | 'do' | 'dont';
+
 export default function HomeScreen({ navigation }: Props) {
   const { directives, isLoading, getDueCheckIn } = useApp();
+  const insets = useSafeAreaInsets();
+  const [filter, setFilter] = React.useState<Filter | null>(null);
   const active = directives.filter((d) => d.active || d.pausedAt);
 
   const dueCount = active.filter((d) => !!getDueCheckIn(d.id)).length;
   const doCount = active.filter((d) => d.type === 'DO').length;
   const dontCount = active.filter((d) => d.type === 'DONT').length;
 
+  const toggleFilter = (f: Filter) => setFilter((cur) => (cur === f ? null : f));
+
+  // Filtered list shown below the stats bar. Tapping a pill toggles its filter.
+  const displayed = active.filter((d) => {
+    if (filter === 'due') return !!getDueCheckIn(d.id);
+    if (filter === 'do') return d.type === 'DO';
+    if (filter === 'dont') return d.type === 'DONT';
+    return true;
+  });
+
   const today = format(new Date(), 'EEEE, MMM d');
+
+  const showHeader = active.length > 0;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
 
-      {/* Hero logo block — centered, owns its own space */}
-      <View style={styles.hero}>
-        <Image
-          source={require('../../assets/logo.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-        <Text style={styles.date}>{today}</Text>
-      </View>
+      {/* Settings + About — always reachable */}
+      <Pressable
+        style={styles.settingsBtn}
+        onPress={() => navigation.navigate('Settings')}
+        hitSlop={8}
+      >
+        <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
+      </Pressable>
+      <Pressable
+        style={styles.aboutBtn}
+        onPress={() => navigation.navigate('About')}
+        hitSlop={8}
+      >
+        <Ionicons name="information-circle-outline" size={24} color={colors.textSecondary} />
+      </Pressable>
+
+      {/* Slim header — only when there are commitments to anchor */}
+      {showHeader && (
+        <View style={styles.hero}>
+          <Image
+            source={require('../../assets/logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <Text style={styles.slogan}>Repetition becomes you.</Text>
+          <Text style={styles.date}>{today}</Text>
+        </View>
+      )}
 
       {/* Stats bar */}
       {active.length > 0 && !isLoading && (
         <View style={styles.statsBar}>
           {dueCount > 0 && (
-            <View style={styles.duePill}>
+            <Pressable
+              style={[styles.duePill, filter === 'due' && styles.duePillActive]}
+              onPress={() => toggleFilter('due')}
+            >
               <View style={styles.dueDot} />
               <Text style={styles.duePillText}>
                 {dueCount} due now
               </Text>
-            </View>
+            </Pressable>
           )}
           {doCount > 0 && (
-            <View style={[styles.statPill, { borderColor: colors.do }]}>
-              <Text style={[styles.statPillText, { color: colors.do }]}>
+            <Pressable
+              style={[
+                styles.statPill,
+                { borderColor: colors.do },
+                filter === 'do' && { backgroundColor: colors.do },
+              ]}
+              onPress={() => toggleFilter('do')}
+            >
+              <Text
+                style={[
+                  styles.statPillText,
+                  { color: filter === 'do' ? colors.background : colors.do },
+                ]}
+              >
                 {doCount} DO
               </Text>
-            </View>
+            </Pressable>
           )}
           {dontCount > 0 && (
-            <View style={[styles.statPill, { borderColor: colors.dont }]}>
-              <Text style={[styles.statPillText, { color: colors.dont }]}>
+            <Pressable
+              style={[
+                styles.statPill,
+                { borderColor: colors.dont },
+                filter === 'dont' && { backgroundColor: colors.dont },
+              ]}
+              onPress={() => toggleFilter('dont')}
+            >
+              <Text
+                style={[
+                  styles.statPillText,
+                  { color: filter === 'dont' ? colors.background : colors.dont },
+                ]}
+              >
                 {dontCount} DON'T
               </Text>
-            </View>
+            </Pressable>
           )}
         </View>
       )}
@@ -75,11 +137,18 @@ export default function HomeScreen({ navigation }: Props) {
         <ActivityIndicator style={{ flex: 1 }} color={colors.accent} size="large" />
       ) : active.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyEmoji}>⚡</Text>
-          <Text style={styles.emptyTitle}>No commitments yet</Text>
-          <Text style={styles.emptyBody}>
-            Decide what you want to do — or stop doing.{'\n'}Hold yourself to it.
-          </Text>
+          <Image
+            source={require('../../assets/logo.png')}
+            style={styles.emptyLogo}
+            resizeMode="contain"
+          />
+          <View style={styles.emptyMessage}>
+            <Text style={styles.emptyCaption}>No commitments yet</Text>
+            <Text style={styles.emptyTitle}>
+              Decide what you want to do —{'\n'}or stop doing.
+            </Text>
+            <Text style={styles.emptyBody}>Hold yourself to it.</Text>
+          </View>
           <Pressable
             style={styles.emptyBtn}
             onPress={() => navigation.navigate('AddDirective')}
@@ -90,29 +159,28 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
       ) : (
         <FlatList
-          data={active}
+          data={displayed}
           keyExtractor={(d) => d.id}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
             <DirectiveCard
               directive={item}
               onPress={() => navigation.navigate('DirectiveDetail', { directiveId: item.id })}
-              onCheckIn={(checkInId) =>
-                navigation.navigate('CheckIn', { directiveId: item.id, checkInId })
-              }
             />
           )}
         />
       )}
 
-      {/* FAB — bottom right, thumb-reachable */}
-      <Pressable
-        style={styles.addBtn}
-        onPress={() => navigation.navigate('AddDirective')}
-        hitSlop={8}
-      >
-        <Ionicons name="add" size={28} color={colors.background} />
-      </Pressable>
+      {/* FAB — only when there are commitments; empty state has its own CTA */}
+      {active.length > 0 && (
+        <Pressable
+          style={[styles.addBtn, { bottom: insets.bottom + spacing.lg }]}
+          onPress={() => navigation.navigate('AddDirective')}
+          hitSlop={8}
+        >
+          <Ionicons name="add" size={28} color={colors.background} />
+        </Pressable>
+      )}
     </SafeAreaView>
   );
 }
@@ -120,9 +188,31 @@ export default function HomeScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
 
+  aboutBtn: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.md,
+    zIndex: 10,
+    width: 38,
+    height: 38,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsBtn: {
+    position: 'absolute',
+    top: spacing.sm,
+    left: spacing.md,
+    zIndex: 10,
+    width: 38,
+    height: 38,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   addBtn: {
     position: 'absolute',
-    bottom: spacing.lg,
     right: spacing.lg,
     zIndex: 10,
     backgroundColor: colors.accent,
@@ -139,13 +229,24 @@ const styles = StyleSheet.create({
   },
   hero: {
     alignItems: 'center',
-    paddingTop: spacing.lg,
+    paddingTop: spacing.sm,
     paddingBottom: spacing.lg,
     gap: spacing.sm,
   },
   logo: {
-    height: 200,
-    width: 200,
+    height: 180,
+    width: 180,
+    // The wordmark sits in a padded square canvas; pull the slogan up to close
+    // the visual gap created by that built-in whitespace so it matches the
+    // slogan→date spacing below.
+    marginBottom: -36,
+  },
+  slogan: {
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.black,
+    color: colors.text,
+    textAlign: 'center',
+    letterSpacing: -0.3,
   },
   date: {
     fontSize: fontSizes.xs,
@@ -172,6 +273,10 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderWidth: 1,
     borderColor: 'rgba(255,180,0,0.3)',
+  },
+  duePillActive: {
+    backgroundColor: 'rgba(255,180,0,0.28)',
+    borderColor: colors.warning,
   },
   dueDot: {
     width: 6,
@@ -204,16 +309,34 @@ const styles = StyleSheet.create({
   empty: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.xl,
-    gap: spacing.sm,
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.xl,
+    paddingTop: '14%',
+    paddingBottom: '14%',
   },
-  emptyEmoji: { fontSize: 64, marginBottom: spacing.sm },
+  emptyLogo: {
+    height: 240,
+    width: 240,
+  },
+  emptyMessage: {
+    alignItems: 'center',
+  },
+  emptyCaption: {
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.medium,
+    color: colors.textSecondary,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+  },
   emptyTitle: {
     fontSize: fontSizes.xl,
     fontWeight: fontWeights.black,
     color: colors.text,
+    textAlign: 'center',
     letterSpacing: -0.5,
+    lineHeight: 32,
+    marginBottom: spacing.sm,
   },
   emptyBody: {
     fontSize: fontSizes.md,
@@ -222,7 +345,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   emptyBtn: {
-    marginTop: spacing.md,
     backgroundColor: colors.accent,
     flexDirection: 'row',
     alignItems: 'center',

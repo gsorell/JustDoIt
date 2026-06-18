@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { format, parseISO } from 'date-fns';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,7 +14,15 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import CharmShelf from '../components/CharmShelf';
+import CountdownRing from '../components/CountdownRing';
 import { useApp } from '../context/AppContext';
+import {
+  defaultTimeOfDayMinutes,
+  formatTimeOfDay,
+  supportsTimeOfDay,
+  windowStartMs,
+} from '../services/scheduling';
 import { windowLabel } from '../services/storage';
 import { CheckIn, RootStackParamList } from '../types';
 import {
@@ -28,14 +38,15 @@ type Props = NativeStackScreenProps<RootStackParamList, 'DirectiveDetail'>;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatDuration(ms: number): string {
+// Compact form for the ring center — drops seconds once we're past an hour so a
+// long window (e.g. "24h 42m") stays on one line and doesn't churn every second.
+function formatDurationCompact(ms: number): string {
   const totalSec = Math.floor(Math.max(ms, 0) / 1000);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  if (h > 0) return `${h}h ${pad(m)}m ${pad(s)}s`;
-  if (m > 0) return `${m}m ${pad(s)}s`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
 }
 
@@ -146,11 +157,25 @@ const stripStyles = StyleSheet.create({
 
 export default function DirectiveDetailScreen({ route, navigation }: Props) {
   const { directiveId } = route.params;
-  const { directives, checkIns, getStreak, pauseDirective, resumeDirective, deleteDirective, failCurrentWindow } =
+  const {
+    directives,
+    checkIns,
+    getStreak,
+    pauseDirective,
+    resumeDirective,
+    deleteDirective,
+    failCurrentWindow,
+    quickCheckIn,
+    updateDirectiveCheckInTime,
+  } =
     useApp();
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showFailConfirm, setShowFailConfirm] = useState(false);
+  const [savingCheckIn, setSavingCheckIn] = useState(false);
+  const [showReminderPicker, setShowReminderPicker] = useState(false);
+  const [reminderPickerValue, setReminderPickerValue] = useState<Date>(new Date());
+  const [isSavingReminder, setIsSavingReminder] = useState(false);
   const [tick, setTick] = useState(0);
 
   const directive = directives.find((d) => d.id === directiveId);
@@ -183,13 +208,13 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
     if (!pendingCheckIn || !directive) return { elapsedMs: 0, remainingMs: 0, windowProgress: 0 };
     const now = Date.now();
     const dueMs = new Date(pendingCheckIn.dueAt).getTime();
-    const totalMs = directive.checkInIntervalMinutes * 60 * 1000;
-    const startMs = dueMs - totalMs;
+    const startMs = windowStartMs(directive, dueMs, checkIns);
+    const totalMs = Math.max(dueMs - startMs, 1);
     const elapsed = Math.max(now - startMs, 0);
     const remaining = Math.max(dueMs - now, 0);
     const progress = Math.min(elapsed / totalMs, 1);
     return { elapsedMs: elapsed, remainingMs: remaining, windowProgress: progress };
-  }, [pendingCheckIn, directive, tick]);
+  }, [pendingCheckIn, directive, checkIns, tick]);
 
   if (!directive) return null;
 
@@ -198,6 +223,10 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
 
   const isDo = directive.type === 'DO';
   const isPaused = !directive.active && !!directive.pausedAt;
+  // Daily+ uses an exact reminder time; sub-daily uses the time as a phase anchor
+  // for when windows land. Both are editable.
+  const dailyReminder = supportsTimeOfDay(directive.checkInIntervalMinutes);
+  const canEditReminderTime = true;
   const accentColor = isDo ? colors.do : colors.dont;
   const accentGlow = isDo ? colors.doGlow : colors.dontGlow;
 
@@ -213,11 +242,14 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
     ? 'scheduled start'
     : isDue
     ? isDo
-      ? "time's up — check in"
-      : 'window complete — check in'
+      ? "time's up"
+      : 'window complete'
     : isDo
     ? 'left in this window'
     : 'resisted so far';
+
+  // When the window is due, the running timer is meaningless — prompt to act.
+  const ringTimeText = isDue ? 'Check in' : formatDurationCompact(timerMs);
 
   // Stats
   const streak = getStreak(directiveId);
@@ -226,20 +258,59 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
   const total = successCount + failCount;
   const rate = total > 0 ? Math.round((successCount / total) * 100) : null;
 
-  // Bar color: for DO, shifts to warning/urgent as deadline approaches
-  // For DON'T, stays accent (filling = achievement building)
-  const barColor = isDo
-    ? windowProgress >= 0.9
-      ? colors.failure
-      : windowProgress >= 0.75
-      ? colors.warning
-      : accentColor
-    : accentColor;
+  function openReminderTimePicker() {
+    if (!directive) return;
+    const source = new Date();
+    const minutes = directive.checkInTimeOfDayMinutes ?? defaultTimeOfDayMinutes();
+    source.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: source,
+        mode: 'time',
+        onChange: async (_event, selected) => {
+          if (!selected) return;
+          const nextMinutes = selected.getHours() * 60 + selected.getMinutes();
+          setIsSavingReminder(true);
+          try {
+            await updateDirectiveCheckInTime(directiveId, nextMinutes);
+          } finally {
+            setIsSavingReminder(false);
+          }
+        },
+      });
+      return;
+    }
+
+    setReminderPickerValue(source);
+    setShowReminderPicker(true);
+  }
+
+  async function commitReminderTime(date: Date) {
+    const nextMinutes = date.getHours() * 60 + date.getMinutes();
+    setIsSavingReminder(true);
+    try {
+      await updateDirectiveCheckInTime(directiveId, nextMinutes);
+      setShowReminderPicker(false);
+    } finally {
+      setIsSavingReminder(false);
+    }
+  }
 
   async function handleDelete() {
     setShowDeleteConfirm(false);
     await deleteDirective(directiveId);
     navigation.goBack();
+  }
+
+  async function handleQuickCheckIn(response: 'success' | 'failure') {
+    if (!pendingCheckIn || savingCheckIn) return;
+    setSavingCheckIn(true);
+    try {
+      await quickCheckIn(pendingCheckIn.id, response);
+    } finally {
+      setSavingCheckIn(false);
+    }
   }
 
   function responseIcon(response: CheckIn['response']) {
@@ -282,22 +353,18 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
             )}
           </View>
 
-          {/* Live clock */}
+          {/* Live radial countdown */}
           {!isPaused && pendingCheckIn && hasStarted && (
-            <View style={styles.clockBlock}>
-              <Text style={styles.clockLabel}>{timerLabel}</Text>
-              <Text style={[styles.clockValue, { color: isDue ? colors.warning : accentColor }]}>
-                {formatDuration(timerMs)}
-              </Text>
-              {/* Progress track */}
-              <View style={styles.clockTrack}>
-                <View
-                  style={[
-                    styles.clockFill,
-                    { width: `${Math.round(windowProgress * 100)}%`, backgroundColor: barColor },
-                  ]}
-                />
-              </View>
+            <View style={styles.ringWrap}>
+              <CountdownRing
+                progress={windowProgress}
+                timeText={ringTimeText}
+                label={timerLabel}
+                isDo={isDo}
+                accentColor={accentColor}
+                isDue={isDue}
+                pulseKey={tick}
+              />
             </View>
           )}
 
@@ -341,6 +408,9 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
             </View>
           )}
 
+          {/* Habit-formation charms */}
+          <CharmShelf reps={successCount} accentColor={accentColor} />
+
           {/* Start / end chips */}
           <View style={styles.chips}>
             {directive.startAt && (
@@ -360,9 +430,39 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
                   : 'open-ended'
               }
             />
+            {directive.checkInTimeOfDayMinutes !== undefined && (
+              <Chip
+                icon="alarm-outline"
+                label={
+                  dailyReminder
+                    ? `Reminder at ${formatTimeOfDay(directive.checkInTimeOfDayMinutes)}`
+                    : `Windows at ${formatTimeOfDay(directive.checkInTimeOfDayMinutes)}`
+                }
+                color={accentColor}
+              />
+            )}
           </View>
 
           {/* Action */}
+          {canEditReminderTime && (
+            <Pressable
+              style={styles.reminderBtn}
+              onPress={openReminderTimePicker}
+              disabled={isSavingReminder}
+            >
+              <Ionicons name="alarm-outline" size={16} color={accentColor} />
+              <Text style={[styles.reminderBtnText, { color: accentColor }]}>
+                {isSavingReminder
+                  ? 'Updating...'
+                  : directive.checkInTimeOfDayMinutes === undefined
+                  ? 'Set window timing'
+                  : dailyReminder
+                  ? `Reminder time: ${formatTimeOfDay(directive.checkInTimeOfDayMinutes)}`
+                  : `Window timing: ${formatTimeOfDay(directive.checkInTimeOfDayMinutes)}`}
+              </Text>
+            </Pressable>
+          )}
+
           {isPaused ? (
             <Pressable
               style={[styles.actionBtn, { backgroundColor: accentColor }]}
@@ -373,11 +473,33 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
             </Pressable>
           ) : (
             <>
+              {/* Check in directly when the window is due */}
+              {isDue && pendingCheckIn && (
+                <View style={styles.checkInRow}>
+                  <Pressable
+                    style={[styles.failBtn, savingCheckIn && styles.btnDisabled]}
+                    onPress={() => handleQuickCheckIn('failure')}
+                    disabled={savingCheckIn}
+                  >
+                    <Ionicons name="close" size={18} color={colors.failure} />
+                    <Text style={styles.failBtnText}>{isDo ? "I didn't" : 'Slipped'}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.passBtn, { backgroundColor: accentColor }, savingCheckIn && styles.btnDisabled]}
+                    onPress={() => handleQuickCheckIn('success')}
+                    disabled={savingCheckIn}
+                  >
+                    <Ionicons name="checkmark" size={18} color={colors.background} />
+                    <Text style={styles.passBtnText}>{isDo ? 'I did it' : 'Resisted'}</Text>
+                  </Pressable>
+                </View>
+              )}
+
               <Pressable style={styles.pauseBtn} onPress={() => pauseDirective(directiveId)}>
                 <Ionicons name="pause" size={16} color={colors.textSecondary} />
                 <Text style={styles.pauseBtnText}>Pause this directive</Text>
               </Pressable>
-              {pendingCheckIn && hasStarted && (
+              {pendingCheckIn && hasStarted && !isDue && (
                 <Pressable style={styles.failWindowBtn} onPress={() => setShowFailConfirm(true)}>
                   <Ionicons name="close-circle-outline" size={16} color={colors.failure} />
                   <Text style={styles.failWindowBtnText}>Fail this window</Text>
@@ -498,6 +620,99 @@ export default function DirectiveDetailScreen({ route, navigation }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Reminder time picker */}
+      {Platform.OS === 'ios' && showReminderPicker && (
+        <Modal
+          transparent
+          animationType="slide"
+          visible
+          onRequestClose={() => setShowReminderPicker(false)}
+        >
+          <Pressable style={styles.modalOverlay} onPress={() => setShowReminderPicker(false)}>
+            <Pressable style={styles.modalBox} onPress={() => {}}>
+              <Text style={styles.modalTitle}>Set reminder time</Text>
+              <DateTimePicker
+                value={reminderPickerValue}
+                mode="time"
+                display="spinner"
+                textColor={colors.text}
+                onChange={(_, date) => {
+                  if (date) setReminderPickerValue(date);
+                }}
+                style={{ width: '100%' }}
+              />
+              <View style={styles.modalBtns}>
+                <Pressable
+                  style={styles.modalCancelBtn}
+                  onPress={() => setShowReminderPicker(false)}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.modalDeleteBtn}
+                  onPress={() => commitReminderTime(reminderPickerValue)}
+                >
+                  <Text style={styles.modalDeleteText}>Set</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {Platform.OS === 'web' && showReminderPicker && (
+        <Modal
+          transparent
+          animationType="fade"
+          visible
+          onRequestClose={() => setShowReminderPicker(false)}
+        >
+          <Pressable style={styles.modalOverlay} onPress={() => setShowReminderPicker(false)}>
+            <Pressable style={styles.modalBox} onPress={() => {}}>
+              <Text style={styles.modalTitle}>Set reminder time</Text>
+              {(React.createElement as any)('input', {
+                key: 'web-reminder-time-picker',
+                type: 'time',
+                autoFocus: true,
+                value: format(reminderPickerValue, 'HH:mm'),
+                style: {
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  border: `1px solid ${colors.border}`,
+                  backgroundColor: colors.surface,
+                  color: colors.text,
+                  fontSize: 16,
+                  boxSizing: 'border-box',
+                },
+                onChange: (e: any) => {
+                  const value = String(e.target.value || '');
+                  const [hh, mm] = value.split(':').map((n: string) => parseInt(n, 10));
+                  if (isNaN(hh) || isNaN(mm)) return;
+                  const next = new Date(reminderPickerValue);
+                  next.setHours(hh, mm, 0, 0);
+                  setReminderPickerValue(next);
+                },
+              })}
+              <View style={styles.modalBtns}>
+                <Pressable
+                  style={styles.modalCancelBtn}
+                  onPress={() => setShowReminderPicker(false)}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.modalDeleteBtn}
+                  onPress={() => commitReminderTime(reminderPickerValue)}
+                >
+                  <Text style={styles.modalDeleteText}>Set</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -637,38 +852,10 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 
-  // Live clock
-  clockBlock: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.xs,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  clockLabel: {
-    fontSize: fontSizes.xs,
-    color: colors.textSecondary,
-    fontWeight: fontWeights.medium,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  clockValue: {
-    fontSize: fontSizes.xxl,
-    fontWeight: fontWeights.black,
-    letterSpacing: -1,
-    lineHeight: fontSizes.xxl + 4,
-  },
-  clockTrack: {
-    height: 4,
-    backgroundColor: colors.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginTop: spacing.xs,
-  },
-  clockFill: {
-    height: 4,
-    borderRadius: 2,
+  // Live radial countdown
+  ringWrap: {
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
   },
 
   pausedBadge: {
@@ -719,6 +906,42 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   statsRow: { flexDirection: 'row', gap: spacing.xs },
 
+  checkInRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  btnDisabled: { opacity: 0.6 },
+  passBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderRadius: radius.full,
+    paddingVertical: spacing.sm + 4,
+  },
+  passBtnText: {
+    color: colors.background,
+    fontWeight: fontWeights.black,
+    fontSize: fontSizes.md,
+  },
+  failBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderRadius: radius.full,
+    paddingVertical: spacing.sm + 4,
+    backgroundColor: 'rgba(255,68,102,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,68,102,0.3)',
+  },
+  failBtnText: {
+    color: colors.failure,
+    fontWeight: fontWeights.bold,
+    fontSize: fontSizes.md,
+  },
   actionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -761,6 +984,21 @@ const styles = StyleSheet.create({
   },
   failWindowBtnText: {
     color: colors.failure,
+    fontWeight: fontWeights.medium,
+    fontSize: fontSizes.md,
+  },
+  reminderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderRadius: radius.full,
+    paddingVertical: spacing.sm + 4,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  reminderBtnText: {
     fontWeight: fontWeights.medium,
     fontSize: fontSizes.md,
   },

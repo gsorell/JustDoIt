@@ -16,6 +16,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useApp } from '../context/AppContext';
+import {
+  defaultTimeOfDayMinutes,
+  formatTimeOfDay,
+  supportsTimeOfDay,
+} from '../services/scheduling';
 import { windowLabel } from '../services/storage';
 import { DirectiveType, RootStackParamList } from '../types';
 import {
@@ -159,6 +164,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
   const [action, setAction] = useState('');
   const [durationDays, setDurationDays] = useState<number | null>(null);
   const [intervalMinutes, setIntervalMinutes] = useState(60);
+  const [checkInTimeOfDayMinutes, setCheckInTimeOfDayMinutes] = useState<number | undefined>(undefined);
   const [customIntervalText, setCustomIntervalText] = useState('');
   const [showCustomInterval, setShowCustomInterval] = useState(false);
   const [customDurationText, setCustomDurationText] = useState('');
@@ -170,7 +176,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
   // iOS / web: track which field the picker is editing + live value while dragging
-  const [pickerTarget, setPickerTarget] = useState<'start' | 'end' | null>(null);
+  const [pickerTarget, setPickerTarget] = useState<'start' | 'end' | 'checkInTime' | null>(null);
   const [pickerValue, setPickerValue] = useState<Date>(new Date());
 
   const isDo = type === 'DO';
@@ -182,11 +188,22 @@ export default function AddDirectiveScreen({ navigation }: Props) {
     step === 2 ||
     step === 3 ||
     step === 4;
+  const canSetTimeOfDay = supportsTimeOfDay(intervalMinutes);
+
+  function selectInterval(minutes: number) {
+    setIntervalMinutes(minutes);
+    setShowCustomInterval(false);
+    // Daily+ gets a default reminder time; sub-daily keeps any time the user
+    // already chose (as a phase anchor) but doesn't force one — it's optional.
+    setCheckInTimeOfDayMinutes((prev) =>
+      prev ?? (supportsTimeOfDay(minutes) ? defaultTimeOfDayMinutes() : undefined)
+    );
+  }
 
   function applyTemplate(t: Template) {
     setType(t.type);
     setAction(t.action);
-    setIntervalMinutes(t.defaultInterval);
+    selectInterval(t.defaultInterval);
     setDurationDays(t.defaultDuration);
     setStep(4); // jump straight to summary
   }
@@ -199,7 +216,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
   function commitCustomInterval() {
     const v = parseInt(customIntervalText, 10);
     if (!isNaN(v) && v > 0) {
-      setIntervalMinutes(v);
+      selectInterval(v);
       setShowCustomInterval(false);
       setCustomIntervalText('');
     }
@@ -214,11 +231,13 @@ export default function AddDirectiveScreen({ navigation }: Props) {
     }
   }
 
-  function commitDate(target: 'start' | 'end', date: Date) {
+  function commitDate(target: 'start' | 'end' | 'checkInTime', date: Date) {
     if (target === 'start') {
       setStartDate(date);
       // If the current endDate would be at or before the new startDate, clear it
       if (endDate && date >= endDate) setEndDate(null);
+    } else if (target === 'checkInTime') {
+      setCheckInTimeOfDayMinutes(date.getHours() * 60 + date.getMinutes());
     } else {
       setEndDate(date);
       // Picking a specific end date clears any duration-days selection
@@ -228,7 +247,34 @@ export default function AddDirectiveScreen({ navigation }: Props) {
     setPickerTarget(null);
   }
 
-  function openDatePicker(target: 'start' | 'end') {
+  function openDatePicker(target: 'start' | 'end' | 'checkInTime') {
+    if (target === 'checkInTime') {
+      const source = new Date();
+      if (checkInTimeOfDayMinutes !== undefined) {
+        source.setHours(
+          Math.floor(checkInTimeOfDayMinutes / 60),
+          checkInTimeOfDayMinutes % 60,
+          0,
+          0
+        );
+      }
+
+      if (Platform.OS === 'android') {
+        DateTimePickerAndroid.open({
+          value: source,
+          mode: 'time',
+          onChange: (_ev, timePart) => {
+            if (!timePart) return;
+            commitDate('checkInTime', timePart);
+          },
+        });
+      } else {
+        setPickerValue(source);
+        setPickerTarget('checkInTime');
+      }
+      return;
+    }
+
     const minDate = target === 'end' ? (startDate ?? new Date()) : new Date();
     const initial =
       target === 'start'
@@ -269,6 +315,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
         action: action.trim(),
         durationDays,
         checkInIntervalMinutes: intervalMinutes,
+        checkInTimeOfDayMinutes,
         carryForward: true,
         startAt: startDate?.toISOString(),
         endAt: endDate?.toISOString(),
@@ -657,7 +704,7 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                         styles.optionItem,
                         selected && { borderColor: accentColor, backgroundColor: accentLight },
                       ]}
-                      onPress={() => { setIntervalMinutes(i.value); setShowCustomInterval(false); }}
+                      onPress={() => selectInterval(i.value)}
                     >
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.optionText, selected && { color: accentColor }]}>
@@ -713,6 +760,78 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                     </Pressable>
                   </View>
                 )}
+
+                {(
+                  <>
+                    <View style={styles.sectionHeader}>
+                      <Text style={styles.sectionLabel}>
+                        {canSetTimeOfDay ? 'Notification time' : 'Window timing (optional)'}
+                      </Text>
+                    </View>
+                    <Pressable
+                      style={[
+                        styles.optionItem,
+                        { borderColor: accentColor, backgroundColor: accentLight },
+                      ]}
+                      onPress={() => openDatePicker('checkInTime')}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.optionText, { color: accentColor }]}>
+                          {checkInTimeOfDayMinutes !== undefined
+                            ? formatTimeOfDay(checkInTimeOfDayMinutes)
+                            : canSetTimeOfDay
+                            ? 'Set reminder time'
+                            : 'Align windows to a time of day'}
+                        </Text>
+                        <Text style={styles.optionSub}>
+                          {canSetTimeOfDay
+                            ? 'Notification will fire at this local time'
+                            : 'Windows phase off this time, so check-ins land when it suits you — not whenever you happened to create this'}
+                        </Text>
+                      </View>
+                      <Ionicons name="alarm-outline" size={16} color={accentColor} />
+                    </Pressable>
+
+                    {Platform.OS === 'web' && pickerTarget === 'checkInTime' && (
+                      <View style={styles.webPickerBlock}>
+                        <View style={styles.webPickerRow}>
+                          {(React.createElement as any)('input', {
+                            key: 'web-checkin-time-picker',
+                            type: 'time',
+                            autoFocus: true,
+                            value: format(pickerValue, 'HH:mm'),
+                            style: {
+                              padding: '10px 12px',
+                              borderRadius: 8,
+                              border: `2px solid ${accentColor}`,
+                              backgroundColor: colors.card,
+                              color: colors.text,
+                              fontSize: 16,
+                              flex: 1,
+                              boxSizing: 'border-box',
+                              outline: 'none',
+                              colorScheme: 'dark',
+                            },
+                            onChange: (e: any) => {
+                              const value = String(e.target.value || '');
+                              const [hh, mm] = value.split(':').map((n: string) => parseInt(n, 10));
+                              if (isNaN(hh) || isNaN(mm)) return;
+                              const d = new Date(pickerValue);
+                              d.setHours(hh, mm, 0, 0);
+                              setPickerValue(d);
+                            },
+                          })}
+                          <Pressable
+                            style={[styles.webSetBtn, { backgroundColor: accentColor }]}
+                            onPress={() => commitDate('checkInTime', pickerValue)}
+                          >
+                            <Text style={styles.webSetText}>Set</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    )}
+                  </>
+                )}
               </View>
             </>
           )}
@@ -758,6 +877,16 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                         {windowLabel(intervalMinutes)}
                       </Text>
                     </View>
+                    {checkInTimeOfDayMinutes !== undefined && (
+                      <View style={styles.summaryRow}>
+                        <Ionicons name="alarm-outline" size={14} color={colors.textSecondary} />
+                        <Text style={styles.summaryMetaText}>
+                          {canSetTimeOfDay
+                            ? `Checks in at ${formatTimeOfDay(checkInTimeOfDayMinutes)}`
+                            : `Windows aligned to ${formatTimeOfDay(checkInTimeOfDayMinutes)}`}
+                        </Text>
+                      </View>
+                    )}
                   </View>
 
                   {/* Tap to edit links */}
@@ -822,7 +951,11 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                 <View style={pickerStyles.handle} />
                 <View style={pickerStyles.header}>
                   <Text style={pickerStyles.title}>
-                    {pickerTarget === 'start' ? 'Set start' : 'Set end'}
+                    {pickerTarget === 'start'
+                      ? 'Set start'
+                      : pickerTarget === 'end'
+                      ? 'Set end'
+                      : 'Set reminder time'}
                   </Text>
                   <Pressable
                     onPress={() => commitDate(pickerTarget, pickerValue)}
@@ -833,10 +966,16 @@ export default function AddDirectiveScreen({ navigation }: Props) {
                 </View>
                 <DateTimePicker
                   value={pickerValue}
-                  mode="datetime"
+                  mode={pickerTarget === 'checkInTime' ? 'time' : 'datetime'}
                   display="spinner"
                   textColor={colors.text}
-                  minimumDate={pickerTarget === 'end' ? (startDate ?? new Date()) : new Date()}
+                  minimumDate={
+                    pickerTarget === 'checkInTime'
+                      ? undefined
+                      : pickerTarget === 'end'
+                      ? (startDate ?? new Date())
+                      : new Date()
+                  }
                   onChange={(_, date) => { if (date) setPickerValue(date); }}
                   style={{ width: '100%' }}
                 />

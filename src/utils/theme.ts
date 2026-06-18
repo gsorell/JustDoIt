@@ -60,21 +60,27 @@ export const radius = {
   full: 9999,
 };
 
+// On web, react-native-web deprecates the individual shadow* props in favor of
+// boxShadow — so emit only boxShadow there, and only the native props on native.
 export const shadows = {
-  sm: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 3,
-    ...(Platform.OS === 'web' ? { boxShadow: '0px 2px 8px rgba(0,0,0,0.4)' } : {}),
-  },
-  md: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    elevation: 6,
-    ...(Platform.OS === 'web' ? { boxShadow: '0px 4px 16px rgba(0,0,0,0.5)' } : {}),
-  },
+  sm:
+    Platform.OS === 'web'
+      ? { boxShadow: '0px 2px 8px rgba(0,0,0,0.4)' }
+      : {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.4,
+          shadowRadius: 8,
+          elevation: 3,
+        },
+  md:
+    Platform.OS === 'web'
+      ? { boxShadow: '0px 4px 16px rgba(0,0,0,0.5)' }
+      : {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.5,
+          shadowRadius: 16,
+          elevation: 6,
+        },
 } as const;

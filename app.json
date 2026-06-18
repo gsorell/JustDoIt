@@ -21,7 +21,8 @@
         "backgroundColor": "#0F0F18"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.gsorell.cadence"
     },
     "web": {
       "favicon": "./assets/favicon-32.png",

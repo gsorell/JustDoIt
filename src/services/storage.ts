@@ -104,6 +104,9 @@ export function computeStreak(
 const DEFAULT_SETTINGS: AppSettings = {
   hasCompletedOnboarding: false,
   notificationsEnabled: false,
+  quietHoursEnabled: true,
+  quietStartMinutes: 22 * 60, // 10:00 PM
+  quietEndMinutes: 7 * 60, //    7:00 AM
 };
 
 export async function getAppSettings(): Promise<AppSettings> {

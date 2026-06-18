@@ -15,6 +15,47 @@ if (Platform.OS !== 'web') {
   });
 }
 
+// ─── Notification action buttons ───────────────────────────────────────────────
+// Two categories so DO and DON'T directives get fitting button copy, while both
+// share the same action identifiers so the response handler can branch on intent.
+
+export const CHECKIN_SUCCESS_ACTION = 'CHECKIN_SUCCESS';
+export const CHECKIN_FAILURE_ACTION = 'CHECKIN_FAILURE';
+
+const DO_CATEGORY = 'checkin-do';
+const DONT_CATEGORY = 'checkin-dont';
+
+function categoryForType(type: Directive['type']): string {
+  return type === 'DONT' ? DONT_CATEGORY : DO_CATEGORY;
+}
+
+/** Build the web Notification `actions` array for a directive type. */
+function webActionsForType(type: Directive['type']) {
+  const isAvoid = type === 'DONT';
+  return [
+    { action: CHECKIN_SUCCESS_ACTION, title: isAvoid ? 'Stayed clean' : 'I did it' },
+    { action: CHECKIN_FAILURE_ACTION, title: isAvoid ? 'I slipped' : "I didn't" },
+  ];
+}
+
+/**
+ * Register the check-in action categories. Call once on app startup (native only).
+ * Action buttons are handled in the background without forcing the app to the
+ * foreground, so a check-in can be recorded straight from the notification panel.
+ */
+export async function registerNotificationCategories(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  const opts = { opensAppToForeground: false };
+  await Notifications.setNotificationCategoryAsync(DO_CATEGORY, [
+    { identifier: CHECKIN_SUCCESS_ACTION, buttonTitle: 'I did it ✅', options: opts },
+    { identifier: CHECKIN_FAILURE_ACTION, buttonTitle: "I didn't", options: opts },
+  ]);
+  await Notifications.setNotificationCategoryAsync(DONT_CATEGORY, [
+    { identifier: CHECKIN_SUCCESS_ACTION, buttonTitle: 'Stayed clean ✅', options: opts },
+    { identifier: CHECKIN_FAILURE_ACTION, buttonTitle: 'I slipped', options: opts },
+  ]);
+}
+
 // ─── Web implementation ───────────────────────────────────────────────────────
 // On web we use the browser Notification API + a service worker.
 // Notifications fire via setTimeout, so they work while the PWA/tab is open.
@@ -50,6 +91,7 @@ async function scheduleWebNotification(
     ? `Did you avoid "${directive.action}" for the last ${label}?`
     : `Did you "${directive.action}" in the last ${label}?`;
   const data = { directiveId: directive.id, checkInId };
+  const actions = webActionsForType(directive.type);
 
   const notifId = `web-${checkInId}`;
 
@@ -61,7 +103,7 @@ async function scheduleWebNotification(
         : null;
     if (sw) {
       // Let the service worker show the notification so it works in background tabs
-      sw.postMessage({ type: 'SHOW_NOTIFICATION', title, body, data });
+      sw.postMessage({ type: 'SHOW_NOTIFICATION', title, body, data, actions });
     } else {
       // Fallback: direct Notification (foreground only)
       const notif = new Notification(title, { body, data, icon: '/assets/logo.png' });
@@ -130,6 +172,7 @@ export async function scheduleNextCheckIn(
         ? `Did you avoid "${directive.action}" for the last ${label}?`
         : `Did you "${directive.action}" in the last ${label}?`,
       data: { directiveId: directive.id, checkInId },
+      categoryIdentifier: categoryForType(directive.type),
       sound: true,
     },
     trigger: {

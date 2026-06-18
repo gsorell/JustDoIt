@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useApp } from '../context/AppContext';
 import { windowLabel } from '../services/storage';
+import { windowStartMs } from '../services/scheduling';
 import { Directive } from '../types';
 import {
   colors,
@@ -17,34 +18,28 @@ import {
 interface Props {
   directive: Directive;
   onPress: () => void;
-  onCheckIn: (checkInId: string) => void;
 }
 
 function elapsedProgressLabel(elapsedMin: number, totalMin: number): string {
   const e = Math.round(elapsedMin);
-  if (totalMin <= 60) return `${e} / ${totalMin} min`;
+  if (totalMin <= 60) return `${e} / ${Math.round(totalMin)} min`;
   const eH = Math.floor(e / 60);
   const eM = e % 60;
-  const tH = totalMin / 60;
+  const tH = Math.round((totalMin / 60) * 10) / 10;
   const elapsedStr = eH > 0 ? `${eH}h${eM > 0 ? ` ${eM}m` : ''}` : `${eM}m`;
   return `${elapsedStr} / ${tH}h`;
 }
 
-function computeProgress(
-  dueNow: boolean,
-  pending: { dueAt: string } | undefined,
-  intervalMinutes: number,
-): number {
+function computeProgress(dueNow: boolean, startMs: number, dueMs: number): number {
   if (dueNow) return 1;
-  if (!pending) return 0;
-  const dueMs = new Date(pending.dueAt).getTime();
-  const totalMs = intervalMinutes * 60 * 1000;
-  const startMs = dueMs - totalMs;
-  return Math.min(Math.max((Date.now() - startMs) / totalMs, 0), 1);
+  if (!dueMs) return 0;
+  const total = dueMs - startMs;
+  if (total <= 0) return 1;
+  return Math.min(Math.max((Date.now() - startMs) / total, 0), 1);
 }
 
-export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) {
-  const { getStreak, getDueCheckIn, getPendingCheckIn } = useApp();
+export default function DirectiveCard({ directive, onPress }: Props) {
+  const { getStreak, getDueCheckIn, getPendingCheckIn, quickCheckIn, checkIns } = useApp();
 
   // Tick every second for the elapsed label
   const [tick, setTick] = useState(0);
@@ -52,6 +47,21 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
     const id = setInterval(() => setTick((t) => t + 1), 1_000);
     return () => clearInterval(id);
   }, []);
+
+  // Inline check-in — records quietly and advances, no navigation.
+  const [saving, setSaving] = useState(false);
+  const handleQuickCheckIn = async (
+    checkInId: string,
+    response: 'success' | 'failure'
+  ) => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await quickCheckIn(checkInId, response);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const streak = getStreak(directive.id);
   const dueNow = getDueCheckIn(directive.id);
@@ -63,15 +73,19 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
   const accentColor = isDo ? colors.do : colors.dont;
   const accentGlow = isDo ? colors.doGlow : colors.dontGlow;
 
+  // True window bounds — span may exceed one interval (deferred past quiet hours,
+  // anchored, or extended after a late response).
+  const dueMs = pending ? new Date(pending.dueAt).getTime() : 0;
+  const startMs = pending ? windowStartMs(directive, dueMs, checkIns) : 0;
+
   // Elapsed label — updates every second
   const elapsedLabel = useMemo(() => {
     if (!pending || dueNow || !hasStarted) return null;
-    const dueMs = new Date(pending.dueAt).getTime();
-    const totalMs = directive.checkInIntervalMinutes * 60 * 1000;
-    const startMs = dueMs - totalMs;
+    const totalMs = dueMs - startMs;
+    if (totalMs <= 0) return null;
     const elapsedMin = Math.max((Date.now() - startMs) / 60_000, 0);
-    return elapsedProgressLabel(elapsedMin, directive.checkInIntervalMinutes);
-  }, [pending, dueNow, hasStarted, directive.checkInIntervalMinutes, tick]);
+    return elapsedProgressLabel(elapsedMin, totalMs / 60_000);
+  }, [pending, dueNow, hasStarted, startMs, dueMs, tick]);
 
   // ── Animated progress bar ──────────────────────────────────────────────────
   // We measure the track width, then animate a pixel value.
@@ -81,21 +95,17 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
   // Recompute target progress every second and animate toward it
   useEffect(() => {
     if (trackWidth === 0) return;
-    const p = hasStarted ? computeProgress(!!dueNow, pending, directive.checkInIntervalMinutes) : 0;
-    const barColor =
-      p >= 0.9 ? colors.failure : p >= 0.75 ? colors.warning : accentColor;
+    const p = hasStarted ? computeProgress(!!dueNow, startMs, dueMs) : 0;
 
     Animated.timing(animatedWidth, {
       toValue: p * trackWidth,
       duration: 1_000,       // glide over exactly one second — matches the tick
       useNativeDriver: false, // width is a layout prop, can't use native driver
     }).start();
-  }, [tick, trackWidth, dueNow, pending, hasStarted, directive.checkInIntervalMinutes]);
+  }, [tick, trackWidth, dueNow, startMs, dueMs, hasStarted]);
 
   // Bar color derived from current progress (non-animated, changes per tick)
-  const progress = hasStarted
-    ? computeProgress(!!dueNow, pending, directive.checkInIntervalMinutes)
-    : 0;
+  const progress = hasStarted ? computeProgress(!!dueNow, startMs, dueMs) : 0;
   const barColor =
     progress >= 0.9 ? colors.failure : progress >= 0.75 ? colors.warning : accentColor;
 
@@ -182,15 +192,30 @@ export default function DirectiveCard({ directive, onPress, onCheckIn }: Props) 
           </View>
         )}
 
-        {/* Check-in button when due */}
+        {/* Inline check-in buttons when due — pass / fail without leaving Home */}
         {!isPaused && hasStarted && dueNow && (
-          <Pressable
-            style={[styles.checkInBtn, { backgroundColor: accentColor }]}
-            onPress={() => onCheckIn(dueNow.id)}
-          >
-            <Ionicons name="flash" size={16} color={colors.background} />
-            <Text style={styles.checkInBtnText}>Check in now</Text>
-          </Pressable>
+          <View style={styles.checkInRow}>
+            <Pressable
+              style={[styles.failBtn, saving && styles.btnDisabled]}
+              onPress={() => handleQuickCheckIn(dueNow.id, 'failure')}
+              disabled={saving}
+            >
+              <Ionicons name="close" size={16} color={colors.failure} />
+              <Text style={styles.failBtnText}>
+                {isDo ? "I didn't" : 'Slipped'}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.passBtn, { backgroundColor: accentColor }, saving && styles.btnDisabled]}
+              onPress={() => handleQuickCheckIn(dueNow.id, 'success')}
+              disabled={saving}
+            >
+              <Ionicons name="checkmark" size={16} color={colors.background} />
+              <Text style={styles.passBtnText}>
+                {isDo ? 'I did it' : 'Resisted'}
+              </Text>
+            </Pressable>
+          </View>
         )}
       </View>
     </Pressable>
@@ -271,7 +296,13 @@ const styles = StyleSheet.create({
     height: 3,
     borderRadius: 2,
   },
-  checkInBtn: {
+  checkInRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  btnDisabled: { opacity: 0.6 },
+  passBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -279,10 +310,28 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
     borderRadius: radius.md,
   },
-  checkInBtnText: {
+  passBtnText: {
     fontSize: fontSizes.md,
     fontWeight: fontWeights.black,
     color: colors.background,
+    letterSpacing: 0.3,
+  },
+  failBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,68,102,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,68,102,0.3)',
+  },
+  failBtnText: {
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.bold,
+    color: colors.failure,
     letterSpacing: 0.3,
   },
 });
