@@ -19,14 +19,13 @@ interface SeedDirective {
   checkInIntervalMinutes: number;
 }
 
+// Generic sample directives for LOCAL DEVELOPMENT ONLY. Seeding is gated behind
+// __DEV__ in AppContext, so this never runs in release/TestFlight/Play builds —
+// real users always start with an empty app.
 const SEED: SeedDirective[] = [
-  { type: 'DONT', action: "don't share knowledge with strangers. Don't show off.", checkInIntervalMinutes: 1440 },
-  { type: 'DO', action: 'practice Flute', checkInIntervalMinutes: 1440 },
-  { type: 'DO', action: 'patience with N', checkInIntervalMinutes: 240 },
-  { type: 'DO', action: "Be deferential with people's vision for themselves", checkInIntervalMinutes: 1440 },
-  { type: 'DONT', action: 'Eat past 9', checkInIntervalMinutes: 1440 },
-  { type: 'DO', action: 'Find something special to do with Neva every day (not sweets or tv)', checkInIntervalMinutes: 720 },
-  { type: 'DO', action: 'Listen more, say less', checkInIntervalMinutes: 1440 },
+  { type: 'DO', action: 'Drink a glass of water', checkInIntervalMinutes: 240 },
+  { type: 'DO', action: 'Stretch for five minutes', checkInIntervalMinutes: 1440 },
+  { type: 'DONT', action: 'No phone in bed', checkInIntervalMinutes: 1440 },
 ];
 
 export async function seedIfNeeded(): Promise<boolean> {

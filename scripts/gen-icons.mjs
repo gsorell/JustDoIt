@@ -17,10 +17,13 @@ async function make(size, bg, markFraction, outPath) {
   const resized = await sharp(TRIMMED_SOURCE)
     .resize(markSize, markSize, { fit: 'contain', kernel: 'lanczos3', background: TRANSPARENT })
     .toBuffer();
-  await sharp({ create: { width: size, height: size, channels: 4, background: bg } })
-    .composite([{ input: resized, left: offset, top: offset }])
-    .png()
-    .toFile(outPath);
+  let pipe = sharp({ create: { width: size, height: size, channels: 4, background: bg } })
+    .composite([{ input: resized, left: offset, top: offset }]);
+  // Opaque-background icons must have NO alpha channel — Apple rejects an App
+  // Store icon that carries one (ITMS-90717), even if it's fully opaque. The
+  // transparent Android adaptive foreground keeps its alpha.
+  if (bg.alpha === 1) pipe = pipe.flatten({ background: bg }).removeAlpha();
+  await pipe.png().toFile(outPath);
   console.log(`✓ ${outPath}`);
 }
 

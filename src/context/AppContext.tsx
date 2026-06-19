@@ -236,13 +236,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    seedIfNeeded()
-      .catch(() => {})
-      .then(() => backfillNotificationsIfNeeded().catch(() => 0))
-      .then(() => reconcile().catch(() => {}))
-      .then(load)
-      .then(() => fireTestNotificationOnce().catch(() => false))
-      .finally(() => setIsLoading(false));
+    const init = async () => {
+      try {
+        // Seed + demo-notification helpers are DEV-ONLY. Real users (release,
+        // TestFlight, Play) must start with an empty app and no test data.
+        if (__DEV__) {
+          await seedIfNeeded().catch(() => {});
+          await backfillNotificationsIfNeeded().catch(() => 0);
+        }
+        await reconcile().catch(() => {});
+        await load();
+        if (__DEV__) await fireTestNotificationOnce().catch(() => false);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    init();
   }, [load, reconcile]);
 
   // Reconcile missed windows, then refresh, on foreground
